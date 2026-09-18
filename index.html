@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="description" content="智能日程文本解析与.ics日历文件生成器，支持PWA安装及文本分享。">
+  <meta name="theme-color" content="#4f46e5">
+  
+  <!-- Apple PWA Meta Tags -->
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="日程生成器">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+
+  <!-- Manifest & Favicon -->
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" type="image/svg+xml" href="icons/favicon.svg">
+  <link rel="alternate icon" href="icons/icon-192.png">
+
+  <title>日程生成器 - CalGen (CF Pages & PWA)</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="container">
+    <!-- Header -->
+    <header class="header">
+      <div class="brand">
+        <div class="brand-icon" aria-hidden="true">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
+            <line x1="16" y1="2" x2="16" y2="6"></line>
+            <line x1="8" y1="2" x2="8" y2="6"></line>
+            <line x1="3" y1="10" x2="21" y2="10"></line>
+            <path d="M8 14h.01"></path>
+            <path d="M12 14h.01"></path>
+            <path d="M16 14h.01"></path>
+            <path d="M8 18h.01"></path>
+            <path d="M12 18h.01"></path>
+          </svg>
+        </div>
+        <div class="brand-title">
+          <h1>
+            日程生成器
+            <span class="brand-badge">PWA</span>
+          </h1>
+          <p>智能解析日程文本 · 自动生成并下载 .ics · 支持分享</p>
+        </div>
+      </div>
+
+      <div class="header-actions">
+        <button id="installAppBtn" class="btn btn-secondary btn-sm" style="display: none;" title="安装为系统原生应用">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+            <polyline points="7 10 12 15 17 10"></polyline>
+            <line x1="12" y1="15" x2="12" y2="3"></line>
+          </svg>
+          安装应用
+        </button>
+      </div>
+    </header>
+
+    <!-- PWA Installation Banner -->
+    <div id="installBanner" class="install-banner">
+      <div class="install-info">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect>
+          <line x1="8" y1="21" x2="16" y2="21"></line>
+          <line x1="12" y1="17" x2="12" y2="21"></line>
+        </svg>
+        <span>添加至主屏幕 / 安装为应用，支持直接接收分享文本</span>
+      </div>
+      <button id="bannerInstallBtn" class="btn btn-primary btn-sm">立即安装</button>
+    </div>
+
+    <!-- Main Input Card -->
+    <main class="card">
+      <div class="input-header">
+        <label for="scheduleInput" class="input-label">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="4 7 4 4 20 4 20 7"></polyline>
+            <line x1="9" y1="20" x2="15" y2="20"></line>
+            <line x1="12" y1="4" x2="12" y2="20"></line>
+          </svg>
+          输入日程文本
+        </label>
+        <div class="input-toggles">
+          <label class="toggle-item" title="使用 Cloudflare Workers AI @cf/google/gemma-4-26b-a4b-it 大模型深度解析">
+            <input type="checkbox" id="aiToggle" checked>
+            <span>Gemma 4 AI</span>
+          </label>
+          <label class="toggle-item" title="输入完成或粘贴后自动生成并触发 .ics 文件下载">
+            <input type="checkbox" id="autoDownloadToggle" checked>
+            <span>自动下载 .ics</span>
+          </label>
+          <button id="aiConfigBtn" type="button" class="btn-icon" title="配置 Cloudflare API Token (可选直连)">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="3"></circle>
+              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+            </svg>
+          </button>
+        </div>
+      </div>
+
+      <div class="textarea-container">
+        <textarea
+          id="scheduleInput"
+          class="schedule-textarea"
+          placeholder="在此输入或粘贴日程，例如：
+• 明天下午3点在会议室开会
+• 9月20日 14:00-15:30 团队周会 地点：3楼大会议室
+• 周五晚上8点聚餐 持续2小时
+• 腾讯会议：123-456-789 下周二10点需求评审"
+          rows="4"
+          spellcheck="false"
+        ></textarea>
+      </div>
+
+      <!-- Quick Preset Suggestions -->
+      <div class="presets-row">
+        <span class="presets-label">快速示例：</span>
+        <button type="button" class="preset-chip" data-text="明天下午3点在会议室开会">明天开会</button>
+        <button type="button" class="preset-chip" data-text="9月20日 14:00-15:30 团队周会 地点：3楼大会议室">周会安排</button>
+        <button type="button" class="preset-chip" data-text="下周五上午10点看牙医">牙医预约</button>
+        <button type="button" class="preset-chip" data-text="周三下午2点半 腾讯会议：123-456-789 讨论需求">线上会议</button>
+        <button type="button" class="preset-chip" data-text="2026-10-01 全天 国庆放假">节假日</button>
+      </div>
+
+      <!-- Real-time Parsed Preview Box -->
+      <div id="previewCard" class="preview-card">
+        <div class="preview-header">
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <span class="preview-badge">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="20 6 9 17 4 12"></polyline>
+              </svg>
+              解析成功
+            </span>
+            <span id="previewEngineBadge" class="engine-badge ai">🤖 Gemma 4 26B</span>
+          </div>
+          <span id="previewStatus" style="font-size: 0.78rem; color: var(--text-muted);">准备就绪</span>
+        </div>
+        <div id="previewTitle" class="preview-title">日程标题</div>
+        <div class="preview-meta">
+          <div class="preview-meta-item">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="10"></circle>
+              <polyline points="12 6 12 12 16 14"></polyline>
+            </svg>
+            <span id="previewTime">--</span>
+          </div>
+          <div id="previewLocItem" class="preview-meta-item" style="display: none;">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path>
+              <circle cx="12" cy="10" r="3"></circle>
+            </svg>
+            <span id="previewLoc">--</span>
+          </div>
+          <div id="previewUrlItem" class="preview-meta-item" style="display: none;">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path>
+              <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path>
+            </svg>
+            <a id="previewUrl" href="#" target="_blank" rel="noopener noreferrer">会议链接</a>
+          </div>
+        </div>
+      </div>
+
+      <!-- Action Buttons -->
+      <div class="input-actions">
+        <button id="clearInputBtn" type="button" class="btn btn-secondary">
+          清空
+        </button>
+        <button id="generateBtn" type="button" class="btn btn-primary">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+            <polyline points="7 10 12 15 17 10"></polyline>
+            <line x1="12" y1="15" x2="12" y2="3"></line>
+          </svg>
+          生成并下载 .ics
+        </button>
+      </div>
+    </main>
+
+    <!-- Schedules Section -->
+    <section class="schedules-section">
+      <div class="section-header">
+        <div class="section-title">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+            <polyline points="14 2 14 8 20 8"></polyline>
+            <line x1="16" y1="13" x2="8" y2="13"></line>
+            <line x1="16" y1="17" x2="8" y2="17"></line>
+            <polyline points="10 9 9 9 8 9"></polyline>
+          </svg>
+          所有日程
+          <span id="scheduleCount" class="count-badge">0</span>
+        </div>
+
+        <div class="section-controls">
+          <button id="cleanupBtn" type="button" class="btn btn-secondary btn-sm" title="立即清理已过期日程">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polyline points="3 6 5 6 21 6"></polyline>
+              <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+            </svg>
+            清理已过期
+          </button>
+          <button id="clearAllBtn" type="button" class="btn btn-secondary btn-sm" title="清空所有日程记录">
+            清空列表
+          </button>
+        </div>
+      </div>
+
+      <!-- Schedule Cards Container -->
+      <div id="schedulesList" class="schedules-list">
+        <!-- Rendered dynamically -->
+      </div>
+
+      <!-- Empty State -->
+      <div id="emptyState" class="empty-state" style="display: none;">
+        <svg class="empty-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
+          <line x1="16" y1="2" x2="16" y2="6"></line>
+          <line x1="8" y1="2" x2="8" y2="6"></line>
+          <line x1="3" y1="10" x2="21" y2="10"></line>
+        </svg>
+        <h3>暂无待办日程</h3>
+        <p>在上方文本框输入或粘贴日程，系统将自动解析并生成 .ics 文件，过时日程会自动清理。</p>
+      </div>
+    </section>
+  </div>
+
+  <!-- Toast Notification Container -->
+  <div id="toastContainer" class="toast-container" aria-live="polite"></div>
+
+  <!-- Modal for optional Cloudflare Settings -->
+  <div id="aiConfigModal" class="modal-backdrop" style="display: none;">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <h3>Cloudflare Workers AI 配置</h3>
+        <button id="closeModalBtn" type="button" class="btn-close">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 12px; line-height: 1.5;">
+          当前已配置使用 Cloudflare 托管的 <strong>@cf/google/gemma-4-26b-a4b-it</strong> 模型。<br>
+          • 部署在 Cloudflare Pages 时：绑定 <code>AI</code> 即可全自动免密调用。<br>
+          • 本地调试或直连时：您可在此输入 Cloudflare 凭证（仅保存在您的本地浏览器中）：
+        </p>
+        <div class="form-group">
+          <label for="cfAccountId">Cloudflare Account ID (选填)</label>
+          <input type="text" id="cfAccountId" class="form-input" placeholder="例如: 3e8b0b5... (32位十六进制字符)">
+        </div>
+        <div class="form-group">
+          <label for="cfApiToken">Cloudflare API Token (选填，具备 Workers AI 权限)</label>
+          <input type="password" id="cfApiToken" class="form-input" placeholder="例如: v8Wj_... 令牌">
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button id="clearConfigBtn" type="button" class="btn btn-secondary btn-sm">清除</button>
+        <button id="saveConfigBtn" type="button" class="btn btn-primary btn-sm">保存并生效</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Footer -->
+  <footer class="footer">
+    <p>CalGen · 搭载 Cloudflare Workers AI (Gemma 4 26B) · 支持离线与 PWA 分享</p>
+  </footer>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,8 @@
+name = "calgen"
+compatibility_date = "2024-09-01"
+pages_build_output_dir = "."
+
+# Cloudflare Workers AI Binding
+# Automatically gives functions/api access to env.AI
+[ai]
+binding = "AI"

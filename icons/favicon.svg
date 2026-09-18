@@ -1,0 +1,50 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="100%" height="100%">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#4f46e5"/>
+      <stop offset="100%" stop-color="#7c3aed"/>
+    </linearGradient>
+    <linearGradient id="headerGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#ef4444"/>
+      <stop offset="100%" stop-color="#f43f5e"/>
+    </linearGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="16" stdDeviation="24" flood-color="#000000" flood-opacity="0.25"/>
+    </filter>
+  </defs>
+
+  <!-- Background Base -->
+  <rect width="512" height="512" rx="112" fill="url(#bgGrad)"/>
+
+  <!-- Calendar Container with shadow -->
+  <g filter="url(#shadow)" transform="translate(64, 64)">
+    <!-- Calendar Body -->
+    <rect x="0" y="32" width="384" height="340" rx="36" fill="#ffffff"/>
+    
+    <!-- Red Calendar Header -->
+    <path d="M 0 68 C 0 48.118 16.118 32 36 32 L 348 32 C 367.882 32 384 48.118 384 68 L 384 120 L 0 120 Z" fill="url(#headerGrad)"/>
+
+    <!-- Binder Rings -->
+    <rect x="88" y="12" width="28" height="48" rx="14" fill="#334155"/>
+    <rect x="268" y="12" width="28" height="48" rx="14" fill="#334155"/>
+
+    <!-- Calendar Grid / Event Checkmarks -->
+    <rect x="52" y="160" width="60" height="44" rx="8" fill="#e2e8f0"/>
+    <rect x="136" y="160" width="60" height="44" rx="8" fill="#e2e8f0"/>
+    <rect x="220" y="160" width="60" height="44" rx="8" fill="#6366f1"/>
+    <rect x="272" y="160" width="60" height="44" rx="8" fill="#e2e8f0"/>
+
+    <rect x="52" y="224" width="60" height="44" rx="8" fill="#e2e8f0"/>
+    <rect x="136" y="224" width="60" height="44" rx="8" fill="#e2e8f0"/>
+    <rect x="220" y="224" width="60" height="44" rx="8" fill="#e2e8f0"/>
+    <rect x="272" y="224" width="60" height="44" rx="8" fill="#e2e8f0"/>
+
+    <rect x="52" y="288" width="60" height="44" rx="8" fill="#e2e8f0"/>
+    <rect x="136" y="288" width="60" height="44" rx="8" fill="#10b981"/>
+    <rect x="220" y="288" width="60" height="44" rx="8" fill="#e2e8f0"/>
+    <rect x="272" y="288" width="60" height="44" rx="8" fill="#e2e8f0"/>
+
+    <!-- Highlighted Star / Sparkle on day 15 -->
+    <circle cx="250" cy="182" r="10" fill="#ffffff"/>
+  </g>
+</svg>
