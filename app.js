@@ -405,14 +405,29 @@ function updatePreview() {
  * Process schedule text: parse (AI or local), save to list, and trigger ICS download
  * @param {string} text
  * @param {boolean} triggerDownload
+ * @param {boolean} force - whether to bypass duplicate check (e.g. manual click)
  */
-async function processAndGenerate(text, triggerDownload = true) {
+async function processAndGenerate(text, triggerDownload = true, force = false) {
   if (!text || !text.trim()) {
     showToast('请输入日程文本', 'info');
     return null;
   }
 
   const targetText = text.trim();
+
+  // Clear any pending timers immediately to prevent duplicate runs
+  clearTimeout(debounceTimer);
+  clearTimeout(autoDownloadTimer);
+
+  // If automatic trigger and text was already downloaded, prevent duplicate download
+  if (!force && triggerDownload && targetText === lastDownloadedText) {
+    return null;
+  }
+
+  if (triggerDownload) {
+    lastDownloadedText = targetText;
+  }
+
   generateBtn.disabled = true;
   generateBtn.innerHTML = '<span class="spinner"></span> 正在解析...';
 
@@ -481,7 +496,6 @@ async function processAndGenerate(text, triggerDownload = true) {
     showToast(successMsg, 'success');
   }
 
-  lastDownloadedText = targetText;
   return event;
 }
 
@@ -501,7 +515,7 @@ function setupListeners() {
       // If auto-download enabled and text has changed significantly
       if (autoDownloadEnabled && parsed && currentText.length >= 4 && currentText !== lastDownloadedText) {
         autoDownloadTimer = setTimeout(() => {
-          processAndGenerate(currentText, true);
+          processAndGenerate(currentText, true, false);
         }, 1600);
       }
     }, 300);
@@ -509,11 +523,16 @@ function setupListeners() {
 
   // Paste event - fast auto-download trigger
   scheduleInput.addEventListener('paste', () => {
+    clearTimeout(debounceTimer);
+    clearTimeout(autoDownloadTimer);
+
     setTimeout(() => {
-      updatePreview();
+      clearTimeout(debounceTimer);
+      clearTimeout(autoDownloadTimer);
+      const parsed = updatePreview();
       const text = scheduleInput.value.trim();
-      if (autoDownloadEnabled && text && text !== lastDownloadedText) {
-        processAndGenerate(text, true);
+      if (autoDownloadEnabled && parsed && text !== lastDownloadedText) {
+        processAndGenerate(text, true, false);
       }
     }, 100);
   });
@@ -592,7 +611,7 @@ function setupListeners() {
       scheduleInput.focus();
       return;
     }
-    processAndGenerate(text, true);
+    processAndGenerate(text, true, true);
   });
 
   // Clear button
@@ -617,7 +636,7 @@ function setupListeners() {
       const sampleText = btn.getAttribute('data-text');
       scheduleInput.value = sampleText;
       updatePreview();
-      processAndGenerate(sampleText, true);
+      processAndGenerate(sampleText, true, true);
     });
   });
 
@@ -707,7 +726,7 @@ function handleIncomingShare() {
     updatePreview();
     // Process and auto-download
     setTimeout(() => {
-      processAndGenerate(combined, true);
+      processAndGenerate(combined, true, true);
     }, 200);
 
     // Clean URL query parameters
@@ -811,7 +830,7 @@ function setupNativePlatform() {
 
       scheduleInput.value = text;
       updatePreview();
-      processAndGenerate(text, true);
+      processAndGenerate(text, true, true);
 
       if (source === 'zip') {
         showToast(`已从压缩包 [${fileName || 'ZIP'}] 中提取文本并开始解析日程！`, 'success');
