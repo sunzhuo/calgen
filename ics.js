@@ -1,5 +1,3 @@
-import { Capacitor } from '@capacitor/core';
-import { CapacitorCalendar } from '@capgo/capacitor-calendar';
 
 /**
  * ICS (iCalendar RFC 5545) generator
@@ -139,10 +137,39 @@ export function buildICS(event) {
 }
 
 /**
- * Check if running inside Capacitor native mobile platform
+ * Safely get Capacitor from global or window if running inside Capacitor native app
+ */
+export function getCapacitor() {
+  if (typeof window !== 'undefined' && window.Capacitor) {
+    return window.Capacitor;
+  }
+  if (typeof globalThis !== 'undefined' && globalThis.Capacitor) {
+    return globalThis.Capacitor;
+  }
+  return null;
+}
+
+/**
+ * Check if running inside Capacitor native mobile platform (Android/iOS APK)
  */
 export function isNativeApp() {
-  return typeof Capacitor !== 'undefined' && Capacitor.isNativePlatform();
+  const cap = getCapacitor();
+  return !!(cap && typeof cap.isNativePlatform === 'function' && cap.isNativePlatform());
+}
+
+/**
+ * Safely get CapacitorCalendar plugin instance in native environment
+ */
+export function getCalendarPlugin() {
+  const cap = getCapacitor();
+  if (!cap) return null;
+  if (cap.Plugins && cap.Plugins.CapacitorCalendar) {
+    return cap.Plugins.CapacitorCalendar;
+  }
+  if (typeof cap.registerPlugin === 'function') {
+    return cap.registerPlugin('CapacitorCalendar');
+  }
+  return null;
 }
 
 /**
@@ -195,43 +222,49 @@ export function downloadICSFile(icsContent, filename = 'schedule.ics') {
 export async function openCalendarEvent(event) {
   // 1. Native Capacitor environment (APK)
   if (isNativeApp()) {
-    try {
-      // Request write permission if not granted
+    const calendarPlugin = getCalendarPlugin();
+    if (calendarPlugin) {
       try {
-        await CapacitorCalendar.requestWriteOnlyCalendarAccess();
-      } catch (permErr) {
-        console.warn('Calendar permission prompt:', permErr);
-      }
+        // Request write permission if not granted
+        try {
+          if (typeof calendarPlugin.requestWriteOnlyCalendarAccess === 'function') {
+            await calendarPlugin.requestWriteOnlyCalendarAccess();
+          }
+        } catch (permErr) {
+          console.warn('Calendar permission prompt:', permErr);
+        }
 
-      const startMs = new Date(event.startTime).getTime();
-      let endMs = new Date(event.endTime).getTime();
-      if (!endMs || isNaN(endMs) || endMs <= startMs) {
-        endMs = startMs + (event.allDay ? 86400000 : 3600000);
-      }
+        const startMs = new Date(event.startTime).getTime();
+        let endMs = new Date(event.endTime).getTime();
+        if (!endMs || isNaN(endMs) || endMs <= startMs) {
+          endMs = startMs + (event.allDay ? 86400000 : 3600000);
+        }
 
-      // Launch native system calendar event creation UI with prefilled fields
-      await CapacitorCalendar.createEventWithPrompt({
-        title: event.title || '日程安排',
-        startDate: startMs,
-        endDate: endMs,
-        isAllDay: Boolean(event.allDay),
-        location: event.location || '',
-        description: [
-          event.description || '',
-          event.url ? `链接: ${event.url}` : ''
-        ].filter(Boolean).join('\n')
-      });
-      return { success: true, method: 'capacitor' };
-    } catch (err) {
-      console.warn('createEventWithPrompt error, attempting fallback to openCalendar:', err);
-      try {
-        await CapacitorCalendar.openCalendar({
-          date: new Date(event.startTime).getTime()
+        // Launch native system calendar event creation UI with prefilled fields
+        await calendarPlugin.createEventWithPrompt({
+          title: event.title || '日程安排',
+          startDate: startMs,
+          endDate: endMs,
+          isAllDay: Boolean(event.allDay),
+          location: event.location || '',
+          description: [
+            event.description || '',
+            event.url ? `链接: ${event.url}` : ''
+          ].filter(Boolean).join('\n')
         });
         return { success: true, method: 'capacitor' };
-      } catch (openErr) {
-        console.error('Capacitor openCalendar failed:', openErr);
-        throw openErr;
+      } catch (err) {
+        console.warn('createEventWithPrompt error, attempting fallback to openCalendar:', err);
+        try {
+          if (typeof calendarPlugin.openCalendar === 'function') {
+            await calendarPlugin.openCalendar({
+              date: new Date(event.startTime).getTime()
+            });
+            return { success: true, method: 'capacitor' };
+          }
+        } catch (openErr) {
+          console.error('Capacitor openCalendar failed:', openErr);
+        }
       }
     }
   }

@@ -18,6 +18,9 @@ let lastDownloadedText = '';
 let debounceTimer = null;
 let autoDownloadTimer = null;
 let aiPreviewAbortController = null;
+let latestParsedText = '';
+let latestAiEvent = null;
+let currentAiPromise = null;
 
 // DOM Elements
 const scheduleInput = document.getElementById('scheduleInput');
@@ -373,20 +376,26 @@ function updatePreview() {
     }
     aiPreviewAbortController = new AbortController();
 
-    parseScheduleWithGemma(text, {
+    const promise = parseScheduleWithGemma(text, {
       accountId: cfAccountId,
       apiToken: cfApiToken,
       signal: aiPreviewAbortController.signal
     }).then((aiEvent) => {
       // Check if current text hasn't changed
       if (scheduleInput.value.trim() === text) {
+        latestParsedText = text;
+        latestAiEvent = aiEvent;
         displayInPreview(aiEvent, true, false);
       }
+      return aiEvent;
     }).catch((err) => {
       if (scheduleInput.value.trim() === text && previewStatus) {
         previewStatus.textContent = '本地解析就绪';
       }
+      return null;
     });
+
+    currentAiPromise = promise;
   }
 
   return localParsed;
@@ -410,11 +419,22 @@ async function processAndGenerate(text, triggerDownload = true) {
   let event = null;
   try {
     if (useAiEnabled) {
-      event = await parseScheduleTextAsync(targetText, {
-        accountId: cfAccountId,
-        apiToken: cfApiToken,
-        useAi: true
-      });
+      // 1. If we already have resolved AI event for this text, reuse it
+      if (latestParsedText === targetText && latestAiEvent) {
+        event = latestAiEvent;
+      } else if (currentAiPromise && scheduleInput.value.trim() === targetText) {
+        // 2. If AI request is currently in-flight, await it
+        event = await currentAiPromise;
+        if (!event) {
+          event = parseScheduleText(targetText);
+        }
+      } else {
+        event = await parseScheduleTextAsync(targetText, {
+          accountId: cfAccountId,
+          apiToken: cfApiToken,
+          useAi: true
+        });
+      }
     } else {
       event = parseScheduleText(targetText);
     }
@@ -580,6 +600,9 @@ function setupListeners() {
     scheduleInput.value = '';
     previewCard.classList.remove('show');
     lastDownloadedText = '';
+    latestParsedText = '';
+    latestAiEvent = null;
+    currentAiPromise = null;
     clearTimeout(debounceTimer);
     clearTimeout(autoDownloadTimer);
     if (aiPreviewAbortController) {

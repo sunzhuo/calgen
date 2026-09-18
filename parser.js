@@ -462,7 +462,9 @@ export async function parseScheduleWithGemma(text, options = {}) {
     apiEndpoint = '/api/parse',
     accountId = '',
     apiToken = '',
-    referenceDate = new Date()
+    referenceDate = new Date(),
+    signal = null,
+    timeoutMs = 8000
   } = options;
 
   const headers = {
@@ -477,11 +479,32 @@ export async function parseScheduleWithGemma(text, options = {}) {
     timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia/Shanghai'
   };
 
-  const res = await fetch(apiEndpoint, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify(body)
-  });
+  // Setup timeout controller
+  const timeoutController = new AbortController();
+  const timerId = setTimeout(() => {
+    timeoutController.abort(new Error('AI parse request timed out'));
+  }, timeoutMs);
+
+  let effectiveSignal = timeoutController.signal;
+  if (signal) {
+    if (typeof AbortSignal.any === 'function') {
+      effectiveSignal = AbortSignal.any([signal, timeoutController.signal]);
+    } else {
+      signal.addEventListener('abort', () => timeoutController.abort(signal.reason), { once: true });
+    }
+  }
+
+  let res;
+  try {
+    res = await fetch(apiEndpoint, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(body),
+      signal: effectiveSignal
+    });
+  } finally {
+    clearTimeout(timerId);
+  }
 
   if (!res.ok) {
     const errorData = await res.json().catch(() => ({}));

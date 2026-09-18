@@ -62,9 +62,7 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  const baseDir = fs.existsSync(path.join(__dirname, 'dist', 'index.html'))
-    ? path.join(__dirname, 'dist')
-    : __dirname;
+  const baseDir = __dirname;
 
   let filePath = path.join(baseDir, url.pathname === '/' ? 'index.html' : url.pathname);
   if (!fs.existsSync(filePath) || fs.statSync(filePath).isDirectory()) {
