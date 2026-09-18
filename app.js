@@ -770,28 +770,49 @@ function setupNativePlatform() {
       `;
     }
 
-    // Native text share intent listener
-    window.addEventListener('calgen:sharedText', (e) => {
-      if (e.detail && typeof e.detail === 'string') {
-        const text = e.detail.trim();
-        if (text) {
-          scheduleInput.value = text;
-          updatePreview();
-          processAndGenerate(text, true);
-          showToast('已接收系统分享文本并开始解析日程！', 'success');
-        }
-      }
-    });
+    function applyIncomingSharedData(payload) {
+      if (!payload) return;
+      let text = '';
+      let source = 'text';
+      let fileName = '';
 
-    if (window.__CALGEN_SHARED_TEXT__) {
-      const text = String(window.__CALGEN_SHARED_TEXT__).trim();
-      window.__CALGEN_SHARED_TEXT__ = null;
-      if (text) {
-        scheduleInput.value = text;
-        updatePreview();
-        processAndGenerate(text, true);
+      if (typeof payload === 'string') {
+        text = payload.trim();
+      } else if (typeof payload === 'object') {
+        text = (payload.text || '').trim();
+        source = payload.source || 'text';
+        fileName = payload.fileName || '';
+      }
+
+      if (!text) return;
+
+      scheduleInput.value = text;
+      updatePreview();
+      processAndGenerate(text, true);
+
+      if (source === 'zip') {
+        showToast(`已从压缩包 [${fileName || 'ZIP'}] 中提取文本并开始解析日程！`, 'success');
+      } else if (source === 'file') {
+        showToast(`已从文件 [${fileName || '文件'}] 中读取文本并开始解析日程！`, 'success');
+      } else {
         showToast('已接收系统分享文本并开始解析日程！', 'success');
       }
+    }
+
+    // Native text/file/zip share intent listener
+    window.addEventListener('calgen:sharedText', (e) => {
+      applyIncomingSharedData(e.detail);
+    });
+
+    if (window.__CALGEN_SHARED_PAYLOAD__) {
+      const payload = window.__CALGEN_SHARED_PAYLOAD__;
+      window.__CALGEN_SHARED_PAYLOAD__ = null;
+      window.__CALGEN_SHARED_TEXT__ = null;
+      applyIncomingSharedData(payload);
+    } else if (window.__CALGEN_SHARED_TEXT__) {
+      const text = window.__CALGEN_SHARED_TEXT__;
+      window.__CALGEN_SHARED_TEXT__ = null;
+      applyIncomingSharedData(text);
     }
   }
 }

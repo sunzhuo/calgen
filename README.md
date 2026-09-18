@@ -88,7 +88,9 @@ npx wrangler pages deploy . --project-name=calgen
 1. **Android 原生应用 (Capacitor APK)**：
    - 采用 **Capacitor 8** 原生打包，内置 **`@capgo/capacitor-calendar`** 插件。
    - 在原生 Android App 内运行时，点击「生成并加入日历」或文本解析完成会自动调用底层原生系统日历接口（`CapacitorCalendar.createEventWithPrompt`），直接弹出系统日历创建弹窗（预填标题、起止时间、地点与备注），彻底解决 Web 无法直接唤起系统日历的问题。
-   - 支持通过系统「分享」直接接收各 App 发送的文本并自动开始解析。
+   - **全格式分享与微信 ZIP 自动解压提取**：
+     - 放宽系统分享过滤器至 `*/*`，支持接收任意文本和文件流（`ACTION_SEND`、`ACTION_SEND_MULTIPLE`、`ACTION_VIEW`）。
+     - 支持微信/QQ等应用分享的 `.zip` 压缩包（或 "其他应用打开"），原生后台自动解压、智能过滤并提取其中的文本内容（支持 UTF-8 与 GBK 自动纠错），无缝送入日程解析引擎生成日历！
    - 安装包直接位于 `app/calgen.apk`，在应用内或网页端点击「下载 APK」即可获取。
 
 2. **本地编译与打包命令**：
