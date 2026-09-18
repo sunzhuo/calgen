@@ -136,6 +136,35 @@ export function buildICS(event) {
 }
 
 /**
+ * Check if the current environment is Android
+ */
+export function isAndroid() {
+  return typeof navigator !== 'undefined' && /android/i.test(navigator.userAgent || '');
+}
+
+/**
+ * Open Android system calendar event creation via Content/Intent URI
+ * Directly opens system calendar create page with title, time, and description
+ * @param {string} title
+ * @param {number|string|Date} startTimestamp
+ * @param {number|string|Date} endTimestamp
+ * @param {string} [description]
+ */
+export function openAndroidCalendar(title, startTimestamp, endTimestamp, description = '') {
+  const startMs = new Date(startTimestamp).getTime();
+  const endMs = new Date(endTimestamp).getTime();
+
+  // 构造 Android 系统日历的 Intent URI
+  const intentUrl = `content://com.android.calendar/time/${startMs}?` +
+    `title=${encodeURIComponent(title || '日程安排')}&` +
+    `description=${encodeURIComponent(description || '')}&` +
+    `beginTime=${startMs}&` +
+    `endTime=${endMs}`;
+
+  window.location.href = intentUrl;
+}
+
+/**
  * Directly trigger system calendar import via Base64 data URI
  * Avoids Blob and link.download so browsers directly prompt to import into calendar
  * @param {string} icsString
@@ -148,6 +177,26 @@ export function openDirectCalendar(icsString) {
   // 2. 直接赋值给 window.location 或打开窗口
   // 在 iOS Safari 和部分 Android 浏览器中，系统检测到 text/calendar 会直接唤起日历确认弹窗
   window.location.href = dataUri;
+}
+
+/**
+ * Trigger calendar open/import for a schedule event
+ * On Android, uses content:// Intent URI to directly open calendar creation
+ * On other platforms (iOS, desktop), uses Base64 data: URI to prompt calendar import
+ * @param {Object} event
+ */
+export function openCalendarEvent(event) {
+  if (isAndroid()) {
+    openAndroidCalendar(
+      event.title,
+      event.startTime,
+      event.endTime,
+      event.description || event.location || ''
+    );
+  } else {
+    const icsData = buildICS(event);
+    openDirectCalendar(icsData);
+  }
 }
 
 /**
