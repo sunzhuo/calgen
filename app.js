@@ -1,5 +1,5 @@
 import { parseScheduleText, parseScheduleTextAsync, parseScheduleWithGemma, isEventOutdated } from './parser.js';
-import { buildICS, downloadICS, openDirectCalendar, openCalendarEvent, isNativeApp } from './ics.js';
+import { buildICS, downloadICS, openCalendarEvent, isNativeApp } from './ics.js';
 
 const STORAGE_KEY = 'calgen_schedules_v1';
 const AUTO_DOWNLOAD_KEY = 'calgen_auto_download';
@@ -457,7 +457,7 @@ async function processAndGenerate(text, triggerDownload = true) {
   if (triggerDownload) {
     await openCalendarEvent(event);
     const engineName = event.parserType === 'gemma-4-26b-a4b-it' ? ' (Gemma 4 AI)' : '';
-    const successMsg = isNativeApp() ? `已唤起系统日历: ${event.title}${engineName}` : `已生成并唤起日历: ${event.title}${engineName}`;
+    const successMsg = isNativeApp() ? `已唤起系统日历: ${event.title}${engineName}` : `已下载 .ics 文件: ${event.title}${engineName}`;
     showToast(successMsg, 'success');
   }
 
@@ -622,7 +622,7 @@ function setupListeners() {
       const item = schedules.find(s => s.id === id);
       if (item) {
         openCalendarEvent(item).then(() => {
-          showToast(isNativeApp() ? `已唤起系统日历: ${item.title}` : `已重新唤起日历: ${item.title}`, 'success');
+          showToast(isNativeApp() ? `已唤起系统日历: ${item.title}` : `已下载 .ics 文件: ${item.title}`, 'success');
         });
       }
       return;

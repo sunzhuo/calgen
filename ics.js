@@ -153,16 +153,33 @@ export function isAndroid() {
 }
 
 /**
+ * Sanitize event title to a valid, clean filename with .ics extension
+ * Removes illegal characters: \ / : * ? " < > | \r \n \t
+ * @param {string} [title]
+ * @returns {string}
+ */
+export function getSafeICSFilename(title = '') {
+  const sanitized = String(title || '')
+    .trim()
+    .replace(/[\r\n\t\\/:*?"<>|]/g, '_')
+    .replace(/_+/g, '_')
+    .trim();
+  const base = sanitized || '日程';
+  return base.endsWith('.ics') ? base : `${base}.ics`;
+}
+
+/**
  * Download standard .ics file via Blob in browser
  * @param {string} icsContent
  * @param {string} [filename]
  */
 export function downloadICSFile(icsContent, filename = 'schedule.ics') {
+  const safeFilename = filename.endsWith('.ics') ? filename : `${filename}.ics`;
   const blob = new Blob([icsContent], { type: 'text/calendar;charset=utf-8' });
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
   link.href = url;
-  link.setAttribute('download', filename.endsWith('.ics') ? filename : `${filename}.ics`);
+  link.setAttribute('download', safeFilename);
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);
@@ -170,28 +187,13 @@ export function downloadICSFile(icsContent, filename = 'schedule.ics') {
 }
 
 /**
- * Directly trigger system calendar import via Base64 data URI
- * Avoids Blob and link.download so browsers directly prompt to import into calendar
- * @param {string} icsString
- */
-export function openDirectCalendar(icsString) {
-  try {
-    const base64Data = btoa(unescape(encodeURIComponent(icsString)));
-    const dataUri = `data:text/calendar;charset=utf8;base64,${base64Data}`;
-    window.location.href = dataUri;
-  } catch (e) {
-    downloadICSFile(icsString, 'schedule.ics');
-  }
-}
-
-/**
  * Trigger calendar open/import for a schedule event
- * - In Capacitor native app (Android APK): invokes @capgo/capacitor-calendar natively
- * - In Web browser: downloads standard .ics file or triggers calendar import
+ * - Only in APK (Capacitor native app): directly invokes system calendar via @capgo/capacitor-calendar
+ * - In Web browser: ONLY downloads standard .ics file using frontend Blob, with parsed event title as filename
  * @param {Object} event
  */
 export async function openCalendarEvent(event) {
-  // 1. Native Capacitor environment
+  // 1. Native Capacitor environment (APK)
   if (isNativeApp()) {
     try {
       // Request write permission if not granted
@@ -229,23 +231,20 @@ export async function openCalendarEvent(event) {
         return { success: true, method: 'capacitor' };
       } catch (openErr) {
         console.error('Capacitor openCalendar failed:', openErr);
+        throw openErr;
       }
     }
   }
 
-  // 2. Web Browser fallback
+  // 2. Web Browser: ONLY generate Blob and trigger .ics file download with parsed event title
   const icsData = buildICS(event);
-  const safeTitle = (event.title || 'schedule').replace(/[\\/:*?"<>|]/g, '_').slice(0, 30);
-  if (isAndroid()) {
-    downloadICSFile(icsData, `${safeTitle}.ics`);
-  } else {
-    openDirectCalendar(icsData);
-  }
-  return { success: true, method: 'web' };
+  const filename = getSafeICSFilename(event.title);
+  downloadICSFile(icsData, filename);
+  return { success: true, method: 'web', filename };
 }
 
 /**
- * Trigger download / open of ICS file in browser (compatibility wrapper)
+ * Trigger download of ICS file in browser
  * @param {string} icsContent
  * @param {string} [filename]
  */

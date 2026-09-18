@@ -20,104 +20,168 @@ def write_png(filename, width, height, pixels):
     ihdr = struct.pack('>IIBBBBB', width, height, 8, 6, 0, 0, 0) # 8-bit RGBA
     png_data = b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', ihdr) + chunk(b'IDAT', compressed) + chunk(b'IEND', b'')
 
+    os.makedirs(os.path.dirname(os.path.abspath(filename)), exist_ok=True)
     with open(filename, 'wb') as f:
         f.write(png_data)
 
-def render_icon(size, is_maskable=False):
+def dist_seg(px, py, ax, ay, bx, by):
+    dx = bx - ax
+    dy = by - ay
+    l2 = dx * dx + dy * dy
+    if l2 == 0:
+        return math.hypot(px - ax, py - ay)
+    t = max(0.0, min(1.0, ((px - ax) * dx + (py - ay) * dy) / l2))
+    return math.hypot(px - (ax + t * dx), py - (ay + t * dy))
+
+def dist_rounded_rect_outline(px, py, cx, cy, bx, by, r, stroke_half_w):
+    qx = abs(px - cx) - (bx - r)
+    qy = abs(py - cy) - (by - r)
+    d_out = math.hypot(max(0.0, qx), max(0.0, qy)) + min(0.0, max(qx, qy)) - r
+    return abs(d_out) - stroke_half_w
+
+def dist_circle(px, py, cx, cy, r):
+    return math.hypot(px - cx, py - cy) - r
+
+def dist_rounded_box_fill(px, py, cx, cy, bx, by, r):
+    qx = abs(px - cx) - (bx - r)
+    qy = abs(py - cy) - (by - r)
+    return math.hypot(max(0.0, qx), max(0.0, qy)) + min(0.0, max(qx, qy)) - r
+
+def render_icon(size, mode='squircle'):
+    """
+    mode:
+      'squircle': rounded rect icon with brand gradient
+      'round': circle icon with brand gradient
+      'maskable': full bleed brand gradient (PWA maskable)
+      'foreground': transparent background with centered white icon for Android adaptive icon
+    """
     pixels = []
     
     # Colors
-    bg_indigo_start = (79, 70, 229, 255)   # #4f46e5
-    bg_purple_end   = (124, 58, 237, 255)  # #7c3aed
-    cal_white       = (255, 255, 255, 255)
-    cal_header_red  = (239, 68, 68, 255)   # #ef4444
-    cal_binder      = (51, 65, 85, 255)     # #334155
-    cal_grid_gray   = (226, 232, 240, 255) # #e2e8f0
-    cal_grid_accent = (99, 102, 241, 255)  # #6366f1
-    cal_grid_green  = (16, 185, 129, 255)  # #10b981
+    bg_start = (79, 70, 229)   # #4f46e5
+    bg_end   = (124, 58, 237)  # #7c3aed
     
-    corner_radius = 0 if is_maskable else int(size * 0.22)
-    padding = int(size * 0.12) if is_maskable else int(size * 0.14)
-    cal_w = size - padding * 2
-    cal_h = int(size * 0.65)
-    cal_x0 = padding
-    cal_y0 = int(size * 0.22)
-    header_h = int(cal_h * 0.26)
-    
+    # Scale calendar shape
+    if mode == 'foreground':
+        # Android adaptive icon foreground: safe area is center 66dp out of 108dp
+        # Scale factor 2.4 / 108.0 * size
+        scale = (size / 108.0) * 2.4
+    elif mode == 'maskable':
+        # Maskable needs slightly more padding so nothing gets clipped by circle masks
+        scale = (size / 24.0) * 0.52
+    else:
+        # Standard launcher icon / web icon
+        scale = (size / 24.0) * 0.62
+
+    cx_px = size / 2.0
+    cy_px = size / 2.0
+    stroke_half_w = 1.0  # in 24x24 units (stroke width = 2.0)
+
+    corner_radius = size * 0.22 if mode == 'squircle' else 0
+
     for y in range(size):
         row = bytearray()
+        py = y + 0.5
         for x in range(size):
-            # Check outer squircle / rounded rect for non-maskable
-            in_bg = True
-            if not is_maskable:
-                dx = max(0, max(corner_radius - x, x - (size - 1 - corner_radius)))
-                dy = max(0, max(corner_radius - y, y - (size - 1 - corner_radius)))
-                if dx * dx + dy * dy > corner_radius * corner_radius:
-                    in_bg = False
+            px = x + 0.5
             
-            if not in_bg:
-                row.extend((0, 0, 0, 0))
-                continue
-            
-            # Base gradient
-            t = (x + y) / (2.0 * size)
-            r = int(bg_indigo_start[0] * (1 - t) + bg_purple_end[0] * t)
-            g = int(bg_indigo_start[1] * (1 - t) + bg_purple_end[1] * t)
-            b = int(bg_indigo_start[2] * (1 - t) + bg_purple_end[2] * t)
-            color = (r, g, b, 255)
-            
-            # Check calendar shape
-            cal_r = int(size * 0.06)
-            in_cal = False
-            if cal_x0 <= x < cal_x0 + cal_w and cal_y0 <= y < cal_y0 + cal_h:
-                cdx = max(0, max(cal_r - (x - cal_x0), (x - cal_x0) - (cal_w - 1 - cal_r)))
-                cdy = max(0, max(cal_r - (y - cal_y0), (y - cal_y0) - (cal_h - 1 - cal_r)))
-                if cdx * cdx + cdy * cdy <= cal_r * cal_r:
-                    in_cal = True
-            
-            if in_cal:
-                # Inside calendar
-                if y < cal_y0 + header_h:
-                    color = cal_header_red
-                else:
-                    color = cal_white
-                    
-                    # Inner grid items
-                    grid_y_start = cal_y0 + header_h + int(size * 0.05)
-                    grid_cell_w = int(size * 0.12)
-                    grid_cell_h = int(size * 0.07)
-                    spacing_x = int(size * 0.04)
-                    spacing_y = int(size * 0.035)
-                    
-                    for r_idx in range(2):
-                        for c_idx in range(3):
-                            gx = cal_x0 + int(size * 0.08) + c_idx * (grid_cell_w + spacing_x)
-                            gy = grid_y_start + r_idx * (grid_cell_h + spacing_y)
-                            if gx <= x < gx + grid_cell_w and gy <= y < gy + grid_cell_h:
-                                if r_idx == 0 and c_idx == 1:
-                                    color = cal_grid_accent
-                                elif r_idx == 1 and c_idx == 0:
-                                    color = cal_grid_green
-                                else:
-                                    color = cal_grid_gray
+            # 1. Background Coverage & Color
+            if mode == 'foreground':
+                bg_alpha = 0.0
+                r_bg, g_bg, b_bg = 255, 255, 255
+            elif mode == 'maskable':
+                bg_alpha = 1.0
+                t = (x + y) / (2.0 * size)
+                r_bg = int(bg_start[0] * (1 - t) + bg_end[0] * t)
+                g_bg = int(bg_start[1] * (1 - t) + bg_end[1] * t)
+                b_bg = int(bg_start[2] * (1 - t) + bg_end[2] * t)
+            elif mode == 'round':
+                d_round = math.hypot(px - cx_px, py - cy_px) - (cx_px - 0.5)
+                bg_alpha = max(0.0, min(1.0, 0.5 - d_round))
+                if bg_alpha <= 0:
+                    row.extend((0, 0, 0, 0))
+                    continue
+                t = (x + y) / (2.0 * size)
+                r_bg = int(bg_start[0] * (1 - t) + bg_end[0] * t)
+                g_bg = int(bg_start[1] * (1 - t) + bg_end[1] * t)
+                b_bg = int(bg_start[2] * (1 - t) + bg_end[2] * t)
+            else: # squircle
+                d_box = dist_rounded_box_fill(px, py, cx_px, cy_px, cx_px, cy_px, corner_radius)
+                bg_alpha = max(0.0, min(1.0, 0.5 - d_box))
+                if bg_alpha <= 0:
+                    row.extend((0, 0, 0, 0))
+                    continue
+                t = (x + y) / (2.0 * size)
+                r_bg = int(bg_start[0] * (1 - t) + bg_end[0] * t)
+                g_bg = int(bg_start[1] * (1 - t) + bg_end[1] * t)
+                b_bg = int(bg_start[2] * (1 - t) + bg_end[2] * t)
 
-            # Binder rings
-            ring_w = int(size * 0.05)
-            ring_h = int(size * 0.11)
-            ring_y = cal_y0 - int(ring_h * 0.35)
-            ring1_x = cal_x0 + int(cal_w * 0.25) - ring_w // 2
-            ring2_x = cal_x0 + int(cal_w * 0.75) - ring_w // 2
-            
-            if ((ring1_x <= x < ring1_x + ring_w) or (ring2_x <= x < ring2_x + ring_w)) and (ring_y <= y < ring_y + ring_h):
-                color = cal_binder
+            # 2. Calendar Shape in 24x24 space
+            x24 = 12.0 + (px - cx_px) / scale
+            y24 = 12.0 + (py - cy_px) / scale
 
-            row.extend(color)
+            # Distance to calendar components:
+            # - Outline rect (center 12, 13, half-w 9, half-h 9, radius 2)
+            d_cal = dist_rounded_rect_outline(x24, y24, 12.0, 13.0, 9.0, 9.0, 2.0, stroke_half_w)
+            # - Top pins
+            d_cal = min(d_cal, dist_seg(x24, y24, 16.0, 2.0, 16.0, 6.0) - stroke_half_w)
+            d_cal = min(d_cal, dist_seg(x24, y24, 8.0, 2.0, 8.0, 6.0) - stroke_half_w)
+            # - Header horizontal line
+            d_cal = min(d_cal, dist_seg(x24, y24, 3.0, 10.0, 21.0, 10.0) - stroke_half_w)
+            # - Dots
+            d_cal = min(d_cal, dist_circle(x24, y24, 8.0, 14.0, 1.0))
+            d_cal = min(d_cal, dist_circle(x24, y24, 12.0, 14.0, 1.0))
+            d_cal = min(d_cal, dist_circle(x24, y24, 16.0, 14.0, 1.0))
+            d_cal = min(d_cal, dist_circle(x24, y24, 8.0, 18.0, 1.0))
+            d_cal = min(d_cal, dist_circle(x24, y24, 12.0, 18.0, 1.0))
+
+            # Anti-aliased coverage in pixel space
+            dist_px = d_cal * scale
+            white_alpha = max(0.0, min(1.0, 0.5 - dist_px))
+
+            if mode == 'foreground':
+                # Pure foreground transparent icon
+                row.extend((255, 255, 255, int(round(white_alpha * 255))))
+            else:
+                # Blend white calendar over background gradient
+                r_out = int(round(r_bg * (1.0 - white_alpha) + 255 * white_alpha))
+                g_out = int(round(g_bg * (1.0 - white_alpha) + 255 * white_alpha))
+                b_out = int(round(b_bg * (1.0 - white_alpha) + 255 * white_alpha))
+                a_out = int(round(bg_alpha * 255))
+                row.extend((r_out, g_out, b_out, a_out))
+                
         pixels.append(row)
     
     return pixels
 
-os.makedirs('icons', exist_ok=True)
-write_png('icons/icon-192.png', 192, 192, render_icon(192, False))
-write_png('icons/icon-512.png', 512, 512, render_icon(512, False))
-write_png('icons/icon-maskable.png', 512, 512, render_icon(512, True))
-print("Icons generated successfully!")
+def main():
+    print("Generating Web PWA icons...")
+    write_png('icons/icon-192.png', 192, 192, render_icon(192, 'squircle'))
+    write_png('icons/icon-512.png', 512, 512, render_icon(512, 'squircle'))
+    write_png('icons/icon-maskable.png', 512, 512, render_icon(512, 'maskable'))
+
+    print("Generating Android mipmap icons...")
+    densities = [
+        ('mipmap-mdpi', 48, 108),
+        ('mipmap-hdpi', 72, 162),
+        ('mipmap-xhdpi', 96, 216),
+        ('mipmap-xxhdpi', 144, 324),
+        ('mipmap-xxxhdpi', 192, 432),
+    ]
+
+    for folder, size, fg_size in densities:
+        path_base = os.path.join('android', 'app', 'src', 'main', 'res', folder)
+        write_png(os.path.join(path_base, 'ic_launcher.png'), size, size, render_icon(size, 'squircle'))
+        write_png(os.path.join(path_base, 'ic_launcher_round.png'), size, size, render_icon(size, 'round'))
+        write_png(os.path.join(path_base, 'ic_maskable.png'), size, size, render_icon(size, 'maskable'))
+        write_png(os.path.join(path_base, 'ic_launcher_foreground.png'), fg_size, fg_size, render_icon(fg_size, 'foreground'))
+        print(f"Generated {folder}: {size}x{size} and {fg_size}x{fg_size}")
+
+    if os.path.exists('android-project'):
+        write_png('android-project/store_icon.png', 512, 512, render_icon(512, 'squircle'))
+        print("Generated android-project/store_icon.png")
+
+    print("All icons successfully generated!")
+
+if __name__ == '__main__':
+    main()
