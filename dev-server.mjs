@@ -62,9 +62,13 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  let filePath = path.join(__dirname, url.pathname === '/' ? 'index.html' : url.pathname);
+  const baseDir = fs.existsSync(path.join(__dirname, 'dist', 'index.html'))
+    ? path.join(__dirname, 'dist')
+    : __dirname;
+
+  let filePath = path.join(baseDir, url.pathname === '/' ? 'index.html' : url.pathname);
   if (!fs.existsSync(filePath) || fs.statSync(filePath).isDirectory()) {
-    filePath = path.join(__dirname, 'index.html');
+    filePath = path.join(baseDir, 'index.html');
   }
 
   const ext = path.extname(filePath).toLowerCase();

@@ -1,5 +1,5 @@
 import { parseScheduleText, parseScheduleTextAsync, parseScheduleWithGemma, isEventOutdated } from './parser.js';
-import { buildICS, downloadICS, openDirectCalendar, openAndroidCalendar, openCalendarEvent } from './ics.js';
+import { buildICS, downloadICS, openDirectCalendar, openCalendarEvent, isNativeApp } from './ics.js';
 
 const STORAGE_KEY = 'calgen_schedules_v1';
 const AUTO_DOWNLOAD_KEY = 'calgen_auto_download';
@@ -283,7 +283,7 @@ function renderSchedulesList() {
             <polyline points="7 10 12 15 17 10"></polyline>
             <line x1="12" y1="15" x2="12" y2="3"></line>
           </svg>
-          下载 .ics
+          ${isNativeApp() ? '加入日历' : '下载 .ics'}
         </button>
         <button type="button" class="btn btn-danger-outline btn-sm delete-btn" data-id="${item.id}" title="删除日程">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -423,13 +423,14 @@ async function processAndGenerate(text, triggerDownload = true) {
     event = parseScheduleText(targetText);
   } finally {
     generateBtn.disabled = false;
+    const btnText = isNativeApp() ? '生成并加入日历' : '生成并下载 .ics';
     generateBtn.innerHTML = `
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
         <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
         <polyline points="7 10 12 15 17 10"></polyline>
         <line x1="12" y1="15" x2="12" y2="3"></line>
       </svg>
-      生成并下载 .ics
+      ${btnText}
     `;
   }
 
@@ -454,9 +455,10 @@ async function processAndGenerate(text, triggerDownload = true) {
   displayInPreview(event, event.parserType === 'gemma-4-26b-a4b-it', false);
 
   if (triggerDownload) {
-    openCalendarEvent(event);
+    await openCalendarEvent(event);
     const engineName = event.parserType === 'gemma-4-26b-a4b-it' ? ' (Gemma 4 AI)' : '';
-    showToast(`已生成并唤起日历: ${event.title}${engineName}`, 'success');
+    const successMsg = isNativeApp() ? `已唤起系统日历: ${event.title}${engineName}` : `已生成并唤起日历: ${event.title}${engineName}`;
+    showToast(successMsg, 'success');
   }
 
   lastDownloadedText = targetText;
@@ -619,8 +621,9 @@ function setupListeners() {
       const id = redownloadBtn.getAttribute('data-id');
       const item = schedules.find(s => s.id === id);
       if (item) {
-        openCalendarEvent(item);
-        showToast(`已重新唤起日历: ${item.title}`, 'success');
+        openCalendarEvent(item).then(() => {
+          showToast(isNativeApp() ? `已唤起系统日历: ${item.title}` : `已重新唤起日历: ${item.title}`, 'success');
+        });
       }
       return;
     }
@@ -743,6 +746,56 @@ function setupPWA() {
   });
 }
 
+/**
+ * Platform adjustments when running inside native Capacitor environment
+ */
+function setupNativePlatform() {
+  if (isNativeApp()) {
+    // Hide download APK button and PWA install buttons in native app
+    const downloadApkBtn = document.getElementById('downloadApkBtn');
+    if (downloadApkBtn) downloadApkBtn.style.display = 'none';
+
+    if (installAppBtn) installAppBtn.style.display = 'none';
+    if (installBanner) installBanner.classList.remove('show');
+
+    // Update main action button text
+    if (generateBtn) {
+      generateBtn.innerHTML = `
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+          <polyline points="7 10 12 15 17 10"></polyline>
+          <line x1="12" y1="15" x2="12" y2="3"></line>
+        </svg>
+        生成并加入日历
+      `;
+    }
+
+    // Native text share intent listener
+    window.addEventListener('calgen:sharedText', (e) => {
+      if (e.detail && typeof e.detail === 'string') {
+        const text = e.detail.trim();
+        if (text) {
+          scheduleInput.value = text;
+          updatePreview();
+          processAndGenerate(text, true);
+          showToast('已接收系统分享文本并开始解析日程！', 'success');
+        }
+      }
+    });
+
+    if (window.__CALGEN_SHARED_TEXT__) {
+      const text = String(window.__CALGEN_SHARED_TEXT__).trim();
+      window.__CALGEN_SHARED_TEXT__ = null;
+      if (text) {
+        scheduleInput.value = text;
+        updatePreview();
+        processAndGenerate(text, true);
+        showToast('已接收系统分享文本并开始解析日程！', 'success');
+      }
+    }
+  }
+}
+
 // Initialization
 document.addEventListener('DOMContentLoaded', () => {
   loadState();
@@ -751,5 +804,7 @@ document.addEventListener('DOMContentLoaded', () => {
   setupListeners();
   handleIncomingShare();
   setupPWA();
+  setupNativePlatform();
 });
+
 

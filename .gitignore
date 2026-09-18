@@ -2,3 +2,5 @@ node_modules/
 android-project/
 *.keystore
 .wrangler/
+dist/
+

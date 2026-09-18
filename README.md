@@ -83,12 +83,28 @@ npx wrangler pages deploy . --project-name=calgen
 
 ---
 
-## 📱 PWA 安装与分享使用说明
+## 📱 PWA 与 Android 原生应用 (Capacitor)
 
-1. **安装到手机/桌面**：
+1. **Android 原生应用 (Capacitor APK)**：
+   - 采用 **Capacitor 8** 原生打包，内置 **`@capgo/capacitor-calendar`** 插件。
+   - 在原生 Android App 内运行时，点击「生成并加入日历」或文本解析完成会自动调用底层原生系统日历接口（`CapacitorCalendar.createEventWithPrompt`），直接弹出系统日历创建弹窗（预填标题、起止时间、地点与备注），彻底解决 Web 无法直接唤起系统日历的问题。
+   - 支持通过系统「分享」直接接收各 App 发送的文本并自动开始解析。
+   - 安装包直接位于 `app/calgen.apk`，在应用内或网页端点击「下载 APK」即可获取。
+
+2. **本地编译与打包命令**：
+   ```bash
+   # 安装依赖
+   npm install
+
+   # 构建前端并同步至 Capacitor
+   npm run cap:build
+
+   # 编译生成 Android Debug APK
+   cd android && .\gradlew.bat assembleDebug
+   ```
+
+3. **PWA 安装**：
    - **Android Chrome / Edge**: 访问网页后，点击顶部的「安装应用」按钮，或点击浏览器菜单中的「添加到主屏幕」/「安装应用」。
    - **iOS Safari**: 访问网页后，点击底部的分享按钮（方框带向上箭头），选择「添加到主屏幕」。
-2. **接收分享文本**：
-   - 在手机其他应用中选中一段日程信息（例如聊天记录或会议通知），点击系统「分享」。
-   - 在分享目标列表中选择「日程生成器」。
-   - 应用会自动启动，读取分享的文本，自动完成解析并生成 `.ics` 文件供导入系统日历。
+   - 在 Web 浏览器中运行时，系统会自动平滑回退为下载标准 `.ics` 文件。
+

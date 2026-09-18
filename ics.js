@@ -1,3 +1,6 @@
+import { Capacitor } from '@capacitor/core';
+import { CapacitorCalendar } from '@capgo/capacitor-calendar';
+
 /**
  * ICS (iCalendar RFC 5545) generator
  */
@@ -136,32 +139,34 @@ export function buildICS(event) {
 }
 
 /**
- * Check if the current environment is Android
+ * Check if running inside Capacitor native mobile platform
+ */
+export function isNativeApp() {
+  return typeof Capacitor !== 'undefined' && Capacitor.isNativePlatform();
+}
+
+/**
+ * Check if the current environment is Android browser/OS
  */
 export function isAndroid() {
   return typeof navigator !== 'undefined' && /android/i.test(navigator.userAgent || '');
 }
 
 /**
- * Open Android system calendar event creation via Content/Intent URI
- * Directly opens system calendar create page with title, time, and description
- * @param {string} title
- * @param {number|string|Date} startTimestamp
- * @param {number|string|Date} endTimestamp
- * @param {string} [description]
+ * Download standard .ics file via Blob in browser
+ * @param {string} icsContent
+ * @param {string} [filename]
  */
-export function openAndroidCalendar(title, startTimestamp, endTimestamp, description = '') {
-  const startMs = new Date(startTimestamp).getTime();
-  const endMs = new Date(endTimestamp).getTime();
-
-  // 构造 Android 系统日历的 Intent URI
-  const intentUrl = `content://com.android.calendar/time/${startMs}?` +
-    `title=${encodeURIComponent(title || '日程安排')}&` +
-    `description=${encodeURIComponent(description || '')}&` +
-    `beginTime=${startMs}&` +
-    `endTime=${endMs}`;
-
-  window.location.href = intentUrl;
+export function downloadICSFile(icsContent, filename = 'schedule.ics') {
+  const blob = new Blob([icsContent], { type: 'text/calendar;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.setAttribute('download', filename.endsWith('.ics') ? filename : `${filename}.ics`);
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  setTimeout(() => URL.revokeObjectURL(url), 10000);
 }
 
 /**
@@ -170,33 +175,73 @@ export function openAndroidCalendar(title, startTimestamp, endTimestamp, descrip
  * @param {string} icsString
  */
 export function openDirectCalendar(icsString) {
-  // 1. 转为 base64 的 data URI
-  const base64Data = btoa(unescape(encodeURIComponent(icsString)));
-  const dataUri = `data:text/calendar;charset=utf8;base64,${base64Data}`;
-
-  // 2. 直接赋值给 window.location 或打开窗口
-  // 在 iOS Safari 和部分 Android 浏览器中，系统检测到 text/calendar 会直接唤起日历确认弹窗
-  window.location.href = dataUri;
+  try {
+    const base64Data = btoa(unescape(encodeURIComponent(icsString)));
+    const dataUri = `data:text/calendar;charset=utf8;base64,${base64Data}`;
+    window.location.href = dataUri;
+  } catch (e) {
+    downloadICSFile(icsString, 'schedule.ics');
+  }
 }
 
 /**
  * Trigger calendar open/import for a schedule event
- * On Android, uses content:// Intent URI to directly open calendar creation
- * On other platforms (iOS, desktop), uses Base64 data: URI to prompt calendar import
+ * - In Capacitor native app (Android APK): invokes @capgo/capacitor-calendar natively
+ * - In Web browser: downloads standard .ics file or triggers calendar import
  * @param {Object} event
  */
-export function openCalendarEvent(event) {
+export async function openCalendarEvent(event) {
+  // 1. Native Capacitor environment
+  if (isNativeApp()) {
+    try {
+      // Request write permission if not granted
+      try {
+        await CapacitorCalendar.requestWriteOnlyCalendarAccess();
+      } catch (permErr) {
+        console.warn('Calendar permission prompt:', permErr);
+      }
+
+      const startMs = new Date(event.startTime).getTime();
+      let endMs = new Date(event.endTime).getTime();
+      if (!endMs || isNaN(endMs) || endMs <= startMs) {
+        endMs = startMs + (event.allDay ? 86400000 : 3600000);
+      }
+
+      // Launch native system calendar event creation UI with prefilled fields
+      await CapacitorCalendar.createEventWithPrompt({
+        title: event.title || '日程安排',
+        startDate: startMs,
+        endDate: endMs,
+        isAllDay: Boolean(event.allDay),
+        location: event.location || '',
+        description: [
+          event.description || '',
+          event.url ? `链接: ${event.url}` : ''
+        ].filter(Boolean).join('\n')
+      });
+      return { success: true, method: 'capacitor' };
+    } catch (err) {
+      console.warn('createEventWithPrompt error, attempting fallback to openCalendar:', err);
+      try {
+        await CapacitorCalendar.openCalendar({
+          date: new Date(event.startTime).getTime()
+        });
+        return { success: true, method: 'capacitor' };
+      } catch (openErr) {
+        console.error('Capacitor openCalendar failed:', openErr);
+      }
+    }
+  }
+
+  // 2. Web Browser fallback
+  const icsData = buildICS(event);
+  const safeTitle = (event.title || 'schedule').replace(/[\\/:*?"<>|]/g, '_').slice(0, 30);
   if (isAndroid()) {
-    openAndroidCalendar(
-      event.title,
-      event.startTime,
-      event.endTime,
-      event.description || event.location || ''
-    );
+    downloadICSFile(icsData, `${safeTitle}.ics`);
   } else {
-    const icsData = buildICS(event);
     openDirectCalendar(icsData);
   }
+  return { success: true, method: 'web' };
 }
 
 /**
@@ -205,5 +250,6 @@ export function openCalendarEvent(event) {
  * @param {string} [filename]
  */
 export function downloadICS(icsContent, filename = 'schedule.ics') {
-  openDirectCalendar(icsContent);
+  downloadICSFile(icsContent, filename);
 }
+
