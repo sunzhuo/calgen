@@ -1,4 +1,4 @@
-const CACHE_NAME = 'calgen-v2';
+const CACHE_NAME = 'calgen-v3';
 const PRECACHE_ASSETS = [
   './',
   './index.html',
@@ -50,12 +50,14 @@ self.addEventListener('fetch', (event) => {
 
   const url = new URL(request.url);
 
-  // If share_target navigation (query params attached to root)
-  if (url.origin === location.origin && (url.searchParams.has('text') || url.searchParams.has('title'))) {
+  // If share_target navigation (query params attached to root or index.html)
+  if (url.origin === location.origin && (url.searchParams.has('text') || url.searchParams.has('title') || url.searchParams.has('url'))) {
     // Deliver index.html from cache or network
     event.respondWith(
-      caches.match('./index.html').then((cached) => {
-        return cached || fetch(request);
+      caches.match('./index.html', { ignoreSearch: true }).then((cached) => {
+        return cached || caches.match('./', { ignoreSearch: true }).then((rootCached) => {
+          return rootCached || fetch(request);
+        });
       })
     );
     return;

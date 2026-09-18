@@ -1,5 +1,5 @@
 {
-  "id": "/",
+  "id": "./",
   "name": "日程生成器 - CalGen",
   "short_name": "日程生成",
   "description": "智能日程文本解析与 .ics 日历文件生成器，支持 PWA 安装及直接接收分享文本",
