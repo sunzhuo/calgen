@@ -1,4 +1,4 @@
-const CACHE_NAME = 'calgen-v3';
+const CACHE_NAME = 'calgen-v4';
 const PRECACHE_ASSETS = [
   './',
   './index.html',
@@ -49,6 +49,12 @@ self.addEventListener('fetch', (event) => {
   }
 
   const url = new URL(request.url);
+
+  // Exclude APK files from Service Worker caching
+  if (url.pathname.endsWith('.apk') || url.pathname.includes('/app/')) {
+    event.respondWith(fetch(request));
+    return;
+  }
 
   // If share_target navigation (query params attached to root or index.html)
   if (url.origin === location.origin && (url.searchParams.has('text') || url.searchParams.has('title') || url.searchParams.has('url'))) {

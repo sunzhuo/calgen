@@ -172,6 +172,13 @@ body {
   color: var(--text-primary);
 }
 
+.banner-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
 /* Input Section */
 .input-header {
   display: flex;
@@ -362,6 +369,7 @@ body {
   border: 1px solid transparent;
   transition: all 0.15s ease;
   user-select: none;
+  text-decoration: none;
 }
 
 .btn-primary {
@@ -636,6 +644,11 @@ body {
 .footer a {
   color: var(--text-secondary);
   text-decoration: none;
+}
+
+.footer a.footer-link {
+  color: var(--primary);
+  font-weight: 500;
 }
 
 .footer a:hover {

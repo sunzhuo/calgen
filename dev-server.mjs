@@ -15,7 +15,8 @@ const MIME_TYPES = {
   '.json': 'application/json; charset=utf-8',
   '.webmanifest': 'application/manifest+json; charset=utf-8',
   '.svg': 'image/svg+xml',
-  '.png': 'image/png'
+  '.png': 'image/png',
+  '.apk': 'application/vnd.android.package-archive'
 };
 
 // Mock Gemma 4 model on local dev server

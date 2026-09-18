@@ -48,6 +48,14 @@
       </div>
 
       <div class="header-actions">
+        <a id="downloadApkBtn" href="app/calgen.apk" download="calgen.apk" class="btn btn-secondary btn-sm" title="下载 Android 原生安装包 (APK)">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+            <polyline points="7 10 12 15 17 10"></polyline>
+            <line x1="12" y1="15" x2="12" y2="3"></line>
+          </svg>
+          下载 APK
+        </a>
         <button id="installAppBtn" class="btn btn-secondary btn-sm" style="display: none;" title="安装为系统原生应用">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
@@ -67,9 +75,12 @@
           <line x1="8" y1="21" x2="16" y2="21"></line>
           <line x1="12" y1="17" x2="12" y2="21"></line>
         </svg>
-        <span>添加至主屏幕 / 安装为应用，支持直接接收分享文本</span>
+        <span>添加至主屏幕或下载 Android APK 原生安装包，支持直接接收分享文本</span>
       </div>
-      <button id="bannerInstallBtn" class="btn btn-primary btn-sm">立即安装</button>
+      <div class="banner-actions">
+        <a href="app/calgen.apk" download="calgen.apk" class="btn btn-secondary btn-sm" title="下载 Android APK">下载 APK</a>
+        <button id="bannerInstallBtn" class="btn btn-primary btn-sm">立即安装</button>
+      </div>
     </div>
 
     <!-- Main Input Card -->
@@ -263,7 +274,7 @@
 
   <!-- Footer -->
   <footer class="footer">
-    <p>CalGen · 搭载 Cloudflare Workers AI (Gemma 4 26B) · 支持离线与 PWA 分享</p>
+    <p>CalGen · 搭载 Cloudflare Workers AI (Gemma 4 26B) · 支持离线与 PWA 分享 · <a href="app/calgen.apk" download="calgen.apk" class="footer-link">下载 Android APK</a></p>
   </footer>
 
   <script type="module" src="app.js"></script>
