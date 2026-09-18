@@ -1,5 +1,5 @@
 import { parseScheduleText, parseScheduleTextAsync, parseScheduleWithGemma, isEventOutdated } from './parser.js';
-import { buildICS, downloadICS } from './ics.js';
+import { buildICS, downloadICS, openDirectCalendar } from './ics.js';
 
 const STORAGE_KEY = 'calgen_schedules_v1';
 const AUTO_DOWNLOAD_KEY = 'calgen_auto_download';
@@ -455,10 +455,9 @@ async function processAndGenerate(text, triggerDownload = true) {
 
   if (triggerDownload) {
     const icsData = buildICS(event);
-    const safeTitle = event.title.replace(/[\/\\:*?"<>|]/g, '_');
-    downloadICS(icsData, `${safeTitle}.ics`);
+    openDirectCalendar(icsData);
     const engineName = event.parserType === 'gemma-4-26b-a4b-it' ? ' (Gemma 4 AI)' : '';
-    showToast(`已生成并下载: ${event.title}.ics${engineName}`, 'success');
+    showToast(`已生成并唤起日历: ${event.title}${engineName}`, 'success');
   }
 
   lastDownloadedText = targetText;
@@ -622,9 +621,8 @@ function setupListeners() {
       const item = schedules.find(s => s.id === id);
       if (item) {
         const icsData = buildICS(item);
-        const safeTitle = item.title.replace(/[\/\\:*?"<>|]/g, '_');
-        downloadICS(icsData, `${safeTitle}.ics`);
-        showToast(`已重新下载: ${item.title}.ics`, 'success');
+        openDirectCalendar(icsData);
+        showToast(`已重新唤起日历: ${item.title}`, 'success');
       }
       return;
     }

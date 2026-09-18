@@ -136,18 +136,25 @@ export function buildICS(event) {
 }
 
 /**
- * Trigger download of ICS file in browser
+ * Directly trigger system calendar import via Base64 data URI
+ * Avoids Blob and link.download so browsers directly prompt to import into calendar
+ * @param {string} icsString
+ */
+export function openDirectCalendar(icsString) {
+  // 1. 转为 base64 的 data URI
+  const base64Data = btoa(unescape(encodeURIComponent(icsString)));
+  const dataUri = `data:text/calendar;charset=utf8;base64,${base64Data}`;
+
+  // 2. 直接赋值给 window.location 或打开窗口
+  // 在 iOS Safari 和部分 Android 浏览器中，系统检测到 text/calendar 会直接唤起日历确认弹窗
+  window.location.href = dataUri;
+}
+
+/**
+ * Trigger download / open of ICS file in browser (compatibility wrapper)
  * @param {string} icsContent
- * @param {string} filename
+ * @param {string} [filename]
  */
 export function downloadICS(icsContent, filename = 'schedule.ics') {
-  const blob = new Blob([icsContent], { type: 'text/calendar;charset=utf-8' });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = filename.endsWith('.ics') ? filename : `${filename}.ics`;
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  setTimeout(() => URL.revokeObjectURL(url), 2000);
+  openDirectCalendar(icsContent);
 }
