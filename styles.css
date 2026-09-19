@@ -819,6 +819,20 @@ body {
   display: inline-block;
 }
 
+.btn-primary .spinner {
+  border-color: rgba(255, 255, 255, 0.35);
+  border-top-color: #ffffff;
+}
+
+.btn-pausing {
+  cursor: pointer;
+}
+
+.btn-pausing:hover {
+  background: var(--primary-hover);
+  box-shadow: 0 2px 4px rgba(79, 70, 229, 0.3);
+}
+
 @keyframes spin {
   to { transform: rotate(360deg); }
 }

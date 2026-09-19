@@ -20,6 +20,9 @@ let aiPreviewAbortController = null;
 let latestParsedText = '';
 let latestAiEvent = null;
 let currentAiPromise = null;
+let isServerAiParsing = false;
+let activeAiAbortController = null;
+let isPausedByUser = false;
 
 // DOM Elements
 const scheduleInput = document.getElementById('scheduleInput');
@@ -457,6 +460,48 @@ function updatePreview() {
 }
 
 /**
+ * Reset the generate button back to its default state
+ */
+function resetGenerateBtn() {
+  if (!generateBtn) return;
+  generateBtn.disabled = false;
+  generateBtn.classList.remove('btn-pausing');
+  const btnText = isNativeApp() ? '生成并加入日历' : '生成并下载 .ics';
+  generateBtn.innerHTML = `
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+      <polyline points="7 10 12 15 17 10"></polyline>
+      <line x1="12" y1="15" x2="12" y2="3"></line>
+    </svg>
+    ${btnText}
+  `;
+}
+
+/**
+ * Pause server-side AI deep parsing and immediately export current local parse result
+ */
+function handlePauseAndExport() {
+  if (!isServerAiParsing) return;
+  isServerAiParsing = false;
+  isPausedByUser = true;
+  generateBtn.disabled = true;
+
+  if (activeAiAbortController) {
+    try {
+      activeAiAbortController.abort();
+    } catch (e) {}
+  }
+  if (aiPreviewAbortController) {
+    try {
+      aiPreviewAbortController.abort();
+    } catch (e) {}
+  }
+  if (previewStatus) {
+    previewStatus.textContent = '已暂停 AI 解析，导出本地结果中...';
+  }
+}
+
+/**
  * Process schedule text: parse (AI or local), save to list, and trigger ICS download
  * @param {string} text
  * @param {boolean} triggerDownload
@@ -483,8 +528,21 @@ async function processAndGenerate(text, triggerDownload = true, force = false) {
     lastDownloadedText = targetText;
   }
 
-  generateBtn.disabled = true;
-  generateBtn.innerHTML = '<span class="spinner"></span> 正在解析...';
+  const isAiPending = useAiEnabled && !(latestParsedText === targetText && latestAiEvent);
+
+  if (isAiPending) {
+    isServerAiParsing = true;
+    isPausedByUser = false;
+    activeAiAbortController = new AbortController();
+    generateBtn.disabled = false;
+    generateBtn.classList.add('btn-pausing');
+    generateBtn.innerHTML = '<span class="spinner"></span> 暂停并导出';
+  } else {
+    isServerAiParsing = false;
+    generateBtn.disabled = true;
+    generateBtn.classList.remove('btn-pausing');
+    generateBtn.innerHTML = '<span class="spinner"></span> 正在解析...';
+  }
 
   let event = null;
   try {
@@ -495,37 +553,35 @@ async function processAndGenerate(text, triggerDownload = true, force = false) {
       } else if (currentAiPromise && scheduleInput.value.trim() === targetText) {
         // 2. If AI request is currently in-flight, await it
         event = await currentAiPromise;
-        if (!event) {
+        if (isPausedByUser || !event) {
           event = parseScheduleText(targetText);
         }
       } else {
         event = await parseScheduleTextAsync(targetText, {
           accountId: cfAccountId,
           apiToken: cfApiToken,
-          useAi: true
+          useAi: true,
+          signal: activeAiAbortController ? activeAiAbortController.signal : null
         });
+        if (isPausedByUser || !event) {
+          event = parseScheduleText(targetText);
+        }
       }
     } else {
       event = parseScheduleText(targetText);
     }
   } catch (err) {
-    console.error('Parsing failed:', err);
+    console.error('Parsing failed or paused:', err);
     event = parseScheduleText(targetText);
   } finally {
-    generateBtn.disabled = false;
-    const btnText = isNativeApp() ? '生成并加入日历' : '生成并下载 .ics';
-    generateBtn.innerHTML = `
-      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-        <polyline points="7 10 12 15 17 10"></polyline>
-        <line x1="12" y1="15" x2="12" y2="3"></line>
-      </svg>
-      ${btnText}
-    `;
+    isServerAiParsing = false;
+    activeAiAbortController = null;
+    resetGenerateBtn();
   }
 
   if (!event) {
     showToast('未能识别有效的时间或日程内容', 'danger');
+    isPausedByUser = false;
     return null;
   }
 
@@ -585,22 +641,37 @@ async function processAndGenerate(text, triggerDownload = true, force = false) {
   renderSchedulesList();
   displayInPreview(event, event.parserType === 'gemma-4-26b-a4b-it', false);
 
-  if (triggerDownload) {
+  if (triggerDownload || isPausedByUser) {
     await openCalendarEvent(event);
-    const engineName = event.parserType === 'gemma-4-26b-a4b-it' ? ' (Gemma 4 AI)' : '';
-    if (isUpdatedExisting) {
-      const successMsg = isNativeApp()
-        ? `已更新系统日历: ${updatedScheduleTitle}${engineName}`
-        : `已更新已有日程并下载 .ics: ${updatedScheduleTitle}${engineName}`;
-      showToast(successMsg, 'success');
+    if (isPausedByUser) {
+      if (isUpdatedExisting) {
+        const successMsg = isNativeApp()
+          ? `已暂停 AI，已更新系统日历: ${updatedScheduleTitle}`
+          : `已暂停 AI，已更新已有日程并导出 .ics: ${updatedScheduleTitle}`;
+        showToast(successMsg, 'success');
+      } else {
+        const successMsg = isNativeApp()
+          ? `已暂停 AI，已加入日历: ${event.title}`
+          : `已暂停 AI，已导出 .ics 文件: ${event.title}`;
+        showToast(successMsg, 'success');
+      }
     } else {
-      const successMsg = isNativeApp()
-        ? `已唤起系统日历: ${event.title}${engineName}`
-        : `已下载 .ics 文件: ${event.title}${engineName}`;
-      showToast(successMsg, 'success');
+      const engineName = event.parserType === 'gemma-4-26b-a4b-it' ? ' (Gemma 4 AI)' : '';
+      if (isUpdatedExisting) {
+        const successMsg = isNativeApp()
+          ? `已更新系统日历: ${updatedScheduleTitle}${engineName}`
+          : `已更新已有日程并下载 .ics: ${updatedScheduleTitle}${engineName}`;
+        showToast(successMsg, 'success');
+      } else {
+        const successMsg = isNativeApp()
+          ? `已唤起系统日历: ${event.title}${engineName}`
+          : `已下载 .ics 文件: ${event.title}${engineName}`;
+        showToast(successMsg, 'success');
+      }
     }
   }
 
+  isPausedByUser = false;
   return event;
 }
 
@@ -710,6 +781,10 @@ function setupListeners() {
 
   // Generate button
   generateBtn.addEventListener('click', () => {
+    if (isServerAiParsing) {
+      handlePauseAndExport();
+      return;
+    }
     const text = scheduleInput.value.trim();
     if (!text) {
       showToast('请输入日程文本后再生成', 'info');
@@ -732,6 +807,12 @@ function setupListeners() {
     if (aiPreviewAbortController) {
       aiPreviewAbortController.abort();
     }
+    if (activeAiAbortController) {
+      activeAiAbortController.abort();
+    }
+    isServerAiParsing = false;
+    isPausedByUser = false;
+    resetGenerateBtn();
     scheduleInput.focus();
   });
 
@@ -888,16 +969,7 @@ function setupNativePlatform() {
     if (downloadApkBtn) downloadApkBtn.style.display = 'none';
 
     // Update main action button text
-    if (generateBtn) {
-      generateBtn.innerHTML = `
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-          <polyline points="7 10 12 15 17 10"></polyline>
-          <line x1="12" y1="15" x2="12" y2="3"></line>
-        </svg>
-        生成并加入日历
-      `;
-    }
+    resetGenerateBtn();
 
     function applyIncomingSharedData(payload) {
       if (!payload) return;
