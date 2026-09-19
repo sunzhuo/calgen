@@ -22,7 +22,7 @@ for (const tc of filenameCases) {
 }
 console.log('✔ All getSafeICSFilename tests passed!');
 
-// Test 2: Mock browser DOM to test openCalendarEvent
+// Test 2: Mock browser DOM to test openCalendarEvent in Web mode
 let triggeredDownloadFilename = null;
 let triggeredBlobContent = null;
 let revokedUrl = null;
@@ -88,5 +88,58 @@ async function testWebDownloadFlow() {
 
 await testWebDownloadFlow();
 
-console.log('\nAll verification tests completed successfully!');
+// Test 3: Mock Capacitor native environment to test Android Intent parameters & double fallback
+let capturedPromptParams = null;
+globalThis.Capacitor = {
+  isNativePlatform: () => true,
+  Plugins: {
+    CapacitorCalendar: {
+      requestWriteOnlyCalendarAccess: async () => ({ result: 'granted' }),
+      createEventWithPrompt: async (params) => {
+        capturedPromptParams = params;
+        return { result: 'created' };
+      }
+    }
+  }
+};
 
+async function testNativeCapacitorFlow() {
+  const nativeTestEvent = {
+    id: 'test-native-event',
+    title: '部门季度总结会',
+    startTime: '2026-09-26T10:00:00',
+    endTime: '2026-09-26T11:30:00',
+    location: '行政楼501会议室',
+    url: 'https://meeting.tencent.com/dm/789012',
+    description: '讨论下季度重点OKR与产品规划'
+  };
+
+  const res = await openCalendarEvent(nativeTestEvent);
+  console.log('openCalendarEvent native result:', res);
+  assert.strictEqual(res.success, true);
+  assert.strictEqual(res.method, 'capacitor');
+  assert.ok(capturedPromptParams, 'capturedPromptParams should be populated');
+
+  // Verify Issue 1: Standard eventLocation and compatible location keys are all present
+  assert.strictEqual(capturedPromptParams.eventLocation, '行政楼501会议室', 'eventLocation key must match location');
+  assert.strictEqual(capturedPromptParams.location, '行政楼501会议室', 'location key must match location');
+  assert.strictEqual(capturedPromptParams.event_location, '行政楼501会议室', 'event_location key must match location');
+  assert.strictEqual(capturedPromptParams.address, '行政楼501会议室', 'address key must match location');
+  assert.strictEqual(capturedPromptParams.title, '部门季度总结会');
+  assert.strictEqual(typeof capturedPromptParams.startDate, 'number');
+  assert.strictEqual(typeof capturedPromptParams.beginTime, 'number');
+  assert.strictEqual(typeof capturedPromptParams.endDate, 'number');
+  assert.strictEqual(typeof capturedPromptParams.endTime, 'number');
+
+  // Verify Issue 2: Double fallback in description for Chinese custom ROMs (HyperOS / HarmonyOS / vivo / OPPO)
+  console.log('Native prompt description:\n' + capturedPromptParams.description);
+  assert.ok(capturedPromptParams.description.startsWith('地点：行政楼501会议室'), 'Description must prepend 地点：xxx as double fallback');
+  assert.ok(capturedPromptParams.description.includes('讨论下季度重点OKR与产品规划'));
+  assert.ok(capturedPromptParams.description.includes('链接：https://meeting.tencent.com/dm/789012'));
+
+  console.log('✔ openCalendarEvent Native Capacitor flow & parameter verification passed!');
+}
+
+await testNativeCapacitorFlow();
+
+console.log('\nAll verification tests completed successfully!');

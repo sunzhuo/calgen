@@ -240,25 +240,38 @@ export async function openCalendarEvent(event) {
           endMs = startMs + (event.allDay ? 86400000 : 3600000);
         }
 
+        const loc = event.location ? String(event.location).trim() : '';
+
+        // 双重兜底：针对国内定制 ROM（小米 HyperOS / 华为鸿蒙 / vivo / OPPO）在 eventLocation 无法匹配高德/百度 POI 时主动清空地点栏的问题
+        // 将地点一并追加到 description 顶部，即使地点栏被清空，用户依然能在日历详情中看到地点
         const descParts = [];
-        if (event.location && !(event.description || '').includes(event.location)) {
-          descParts.push(`地点: ${event.location.trim()}`);
+        if (loc) {
+          descParts.push(`地点：${loc}`);
         }
-        if (event.description) {
-          descParts.push(event.description);
+        if (event.description && event.description.trim()) {
+          const cleanDesc = event.description.trim();
+          if (!cleanDesc.startsWith(`地点：${loc}`) && !cleanDesc.startsWith(`地点: ${loc}`)) {
+            descParts.push(cleanDesc);
+          }
         }
-        if (event.url) {
-          descParts.push(`链接: ${event.url}`);
+        if (event.url && event.url.trim()) {
+          descParts.push(`链接：${event.url.trim()}`);
         }
+        const finalDescription = descParts.join('\n\n');
 
         // Launch native system calendar event creation UI with prefilled fields
         await calendarPlugin.createEventWithPrompt({
           title: event.title || '日程安排',
           startDate: startMs,
           endDate: endMs,
+          beginTime: startMs,
+          endTime: endMs,
           isAllDay: Boolean(event.allDay),
-          location: event.location ? String(event.location).trim() : '',
-          description: descParts.join('\n')
+          eventLocation: loc, // Android 官方原生标准键名 CalendarContract.Events.EVENT_LOCATION ("eventLocation")
+          location: loc,      // 插件与定制 ROM 兼容键名
+          event_location: loc,
+          address: loc,
+          description: finalDescription
         });
         return { success: true, method: 'capacitor' };
       } catch (err) {
