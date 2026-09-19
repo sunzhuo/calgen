@@ -1,18 +1,20 @@
-import { parseScheduleText, parseScheduleTextAsync, parseScheduleWithGemma, isEventOutdated, findMatchingSchedule } from './parser.js';
+import { parseScheduleText, parseScheduleTextAsync, parseScheduleWithAI, testAiConnection, isEventOutdated, findMatchingSchedule } from './parser.js';
 import { buildICS, downloadICS, openCalendarEvent, isNativeApp, getSafeICSFilename } from './ics.js';
 
 const STORAGE_KEY = 'calgen_schedules_v1';
 const AUTO_DOWNLOAD_KEY = 'calgen_auto_download';
 const USE_AI_KEY = 'calgen_use_ai';
-const CF_ACCOUNT_KEY = 'calgen_cf_account_id';
-const CF_TOKEN_KEY = 'calgen_cf_api_token';
+const AI_API_URL_KEY = 'calgen_ai_api_url';
+const AI_API_KEY_KEY = 'calgen_ai_api_key';
+const AI_MODEL_KEY = 'calgen_ai_model';
 
 // State
 let schedules = [];
 let autoDownloadEnabled = true;
 let useAiEnabled = true;
-let cfAccountId = '';
-let cfApiToken = '';
+let aiApiUrl = '';
+let aiApiKey = '';
+let aiModel = '';
 let lastDownloadedText = '';
 let debounceTimer = null;
 let autoDownloadTimer = null;
@@ -52,8 +54,10 @@ const aiConfigModal = document.getElementById('aiConfigModal');
 const closeModalBtn = document.getElementById('closeModalBtn');
 const saveConfigBtn = document.getElementById('saveConfigBtn');
 const clearConfigBtn = document.getElementById('clearConfigBtn');
-const cfAccountIdInput = document.getElementById('cfAccountId');
-const cfApiTokenInput = document.getElementById('cfApiToken');
+const testConfigBtn = document.getElementById('testConfigBtn');
+const aiApiUrlInput = document.getElementById('aiApiUrl');
+const aiApiKeyInput = document.getElementById('aiApiKey');
+const aiModelInput = document.getElementById('aiModel');
 
 /**
  * Show a toast notification
@@ -159,10 +163,12 @@ function loadState() {
     if (aiToggle) aiToggle.checked = useAiEnabled;
   }
 
-  cfAccountId = localStorage.getItem(CF_ACCOUNT_KEY) || '';
-  cfApiToken = localStorage.getItem(CF_TOKEN_KEY) || '';
-  if (cfAccountIdInput) cfAccountIdInput.value = cfAccountId;
-  if (cfApiTokenInput) cfApiTokenInput.value = cfApiToken;
+  aiApiUrl = localStorage.getItem(AI_API_URL_KEY) || '';
+  aiApiKey = localStorage.getItem(AI_API_KEY_KEY) || '';
+  aiModel = localStorage.getItem(AI_MODEL_KEY) || '';
+  if (aiApiUrlInput) aiApiUrlInput.value = aiApiUrl;
+  if (aiApiKeyInput) aiApiKeyInput.value = aiApiKey;
+  if (aiModelInput) aiModelInput.value = aiModel;
 }
 
 /**
@@ -222,7 +228,7 @@ function renderSchedulesList() {
 
     const relTag = getRelativeDateTag(item.startTime);
     const formattedTime = formatDisplayDateTime(item.startTime, item.endTime, item.allDay);
-    const isAi = item.parserType === 'gemma-4-26b-a4b-it';
+    const isAi = item.parserType === 'ai' || item.parserType === 'gemma-4-26b-a4b-it';
 
     card.innerHTML = `
       <div class="schedule-card-top">
@@ -232,7 +238,7 @@ function renderSchedulesList() {
             ${item.isModified ? '<span class="time-tag modified">已更新</span>' : ''}
             <span>${escapeHtml(item.title)}</span>
             <span class="engine-badge ${isAi ? 'ai' : 'local'}" style="font-size: 0.7rem; padding: 1px 6px;">
-              ${isAi ? '🤖 Gemma 4' : '⚡ 本地'}
+              ${isAi ? '🤖 AI' : '⚡ 本地'}
             </span>
           </div>
         </div>
@@ -395,7 +401,7 @@ function displayInPreview(event, isAi = false, isPending = false) {
   }
 
   if (previewEngineBadge) {
-    previewEngineBadge.textContent = isAi ? '🤖 Gemma 4 26B' : '⚡ 本地解析';
+    previewEngineBadge.textContent = isAi ? '🤖 AI' : '⚡ 本地解析';
     previewEngineBadge.className = `engine-badge ${isAi ? 'ai' : 'local'}`;
   }
 
@@ -412,7 +418,7 @@ function displayInPreview(event, isAi = false, isPending = false) {
 
 /**
  * Handle real-time preview of parsed text
- * First instant local preview, then async Gemma AI refinement
+ * First instant local preview, then async AI refinement
  */
 function updatePreview() {
   const text = scheduleInput.value.trim();
@@ -427,16 +433,17 @@ function updatePreview() {
     displayInPreview(localParsed, false, useAiEnabled);
   }
 
-  // 2. If AI enabled, trigger background Gemma 4 parse
+  // 2. If AI enabled, trigger background AI parse
   if (useAiEnabled && text.length >= 4) {
     if (aiPreviewAbortController) {
       aiPreviewAbortController.abort();
     }
     aiPreviewAbortController = new AbortController();
 
-    const promise = parseScheduleWithGemma(text, {
-      accountId: cfAccountId,
-      apiToken: cfApiToken,
+    const promise = parseScheduleWithAI(text, {
+      apiUrl: aiApiUrl,
+      apiKey: aiApiKey,
+      model: aiModel,
       signal: aiPreviewAbortController.signal
     }).then((aiEvent) => {
       // Check if current text hasn't changed
@@ -558,8 +565,9 @@ async function processAndGenerate(text, triggerDownload = true, force = false) {
         }
       } else {
         event = await parseScheduleTextAsync(targetText, {
-          accountId: cfAccountId,
-          apiToken: cfApiToken,
+          apiUrl: aiApiUrl,
+          apiKey: aiApiKey,
+          model: aiModel,
           useAi: true,
           signal: activeAiAbortController ? activeAiAbortController.signal : null
         });
@@ -637,9 +645,10 @@ async function processAndGenerate(text, triggerDownload = true, force = false) {
     }
   }
 
+  const isAiEvent = event.parserType === 'ai' || event.parserType === 'gemma-4-26b-a4b-it';
   saveSchedules();
   renderSchedulesList();
-  displayInPreview(event, event.parserType === 'gemma-4-26b-a4b-it', false);
+  displayInPreview(event, isAiEvent, false);
 
   if (triggerDownload || isPausedByUser) {
     await openCalendarEvent(event);
@@ -656,7 +665,7 @@ async function processAndGenerate(text, triggerDownload = true, force = false) {
         showToast(successMsg, 'success');
       }
     } else {
-      const engineName = event.parserType === 'gemma-4-26b-a4b-it' ? ' (Gemma 4 AI)' : '';
+      const engineName = isAiEvent ? ' (AI)' : '';
       if (isUpdatedExisting) {
         const successMsg = isNativeApp()
           ? `已更新系统日历: ${updatedScheduleTitle}${engineName}`
@@ -725,7 +734,7 @@ function setupListeners() {
     aiToggle.addEventListener('change', (e) => {
       useAiEnabled = e.target.checked;
       localStorage.setItem(USE_AI_KEY, String(useAiEnabled));
-      showToast(useAiEnabled ? '已启用 Gemma 4 AI 深度解析' : '已切换为本地轻量规则解析', 'info');
+      showToast(useAiEnabled ? '已启用 AI 深度解析' : '已切换为本地轻量规则解析', 'info');
       updatePreview();
     });
   }
@@ -733,8 +742,9 @@ function setupListeners() {
   // Modal open & close
   if (aiConfigBtn) {
     aiConfigBtn.addEventListener('click', () => {
-      cfAccountIdInput.value = cfAccountId;
-      cfApiTokenInput.value = cfApiToken;
+      if (aiApiUrlInput) aiApiUrlInput.value = aiApiUrl;
+      if (aiApiKeyInput) aiApiKeyInput.value = aiApiKey;
+      if (aiModelInput) aiModelInput.value = aiModel;
       aiConfigModal.style.display = 'flex';
     });
   }
@@ -753,28 +763,69 @@ function setupListeners() {
     });
   }
 
+  // Preset chips in AI config modal
+  document.querySelectorAll('.api-preset-chip').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const url = btn.getAttribute('data-url');
+      const model = btn.getAttribute('data-model');
+      if (url && aiApiUrlInput) aiApiUrlInput.value = url;
+      if (model && aiModelInput) aiModelInput.value = model;
+    });
+  });
+
+  // Test connection button
+  if (testConfigBtn) {
+    testConfigBtn.addEventListener('click', async () => {
+      const url = aiApiUrlInput ? aiApiUrlInput.value.trim() : '';
+      const key = aiApiKeyInput ? aiApiKeyInput.value.trim() : '';
+      const model = aiModelInput ? aiModelInput.value.trim() : '';
+      if (!url) {
+        showToast('请先输入 API 接口地址', 'info');
+        if (aiApiUrlInput) aiApiUrlInput.focus();
+        return;
+      }
+      testConfigBtn.disabled = true;
+      const originalText = testConfigBtn.innerHTML;
+      testConfigBtn.innerHTML = '<span class="spinner"></span> 测试中...';
+      try {
+        await testAiConnection({ apiUrl: url, apiKey: key, model: model });
+        showToast('✅ API 连接成功！', 'success');
+      } catch (err) {
+        showToast(`❌ 连接失败: ${err.message}`, 'danger');
+      } finally {
+        testConfigBtn.disabled = false;
+        testConfigBtn.innerHTML = originalText;
+      }
+    });
+  }
+
   if (saveConfigBtn) {
     saveConfigBtn.addEventListener('click', () => {
-      cfAccountId = cfAccountIdInput.value.trim();
-      cfApiToken = cfApiTokenInput.value.trim();
-      localStorage.setItem(CF_ACCOUNT_KEY, cfAccountId);
-      localStorage.setItem(CF_TOKEN_KEY, cfApiToken);
+      aiApiUrl = aiApiUrlInput ? aiApiUrlInput.value.trim() : '';
+      aiApiKey = aiApiKeyInput ? aiApiKeyInput.value.trim() : '';
+      aiModel = aiModelInput ? aiModelInput.value.trim() : '';
+      localStorage.setItem(AI_API_URL_KEY, aiApiUrl);
+      localStorage.setItem(AI_API_KEY_KEY, aiApiKey);
+      localStorage.setItem(AI_MODEL_KEY, aiModel);
       aiConfigModal.style.display = 'none';
-      showToast('Cloudflare 配置已更新并保存到本地', 'success');
+      showToast('AI 配置已保存到本地', 'success');
       updatePreview();
     });
   }
 
   if (clearConfigBtn) {
     clearConfigBtn.addEventListener('click', () => {
-      cfAccountId = '';
-      cfApiToken = '';
-      cfAccountIdInput.value = '';
-      cfApiTokenInput.value = '';
-      localStorage.removeItem(CF_ACCOUNT_KEY);
-      localStorage.removeItem(CF_TOKEN_KEY);
+      aiApiUrl = '';
+      aiApiKey = '';
+      aiModel = '';
+      if (aiApiUrlInput) aiApiUrlInput.value = '';
+      if (aiApiKeyInput) aiApiKeyInput.value = '';
+      if (aiModelInput) aiModelInput.value = '';
+      localStorage.removeItem(AI_API_URL_KEY);
+      localStorage.removeItem(AI_API_KEY_KEY);
+      localStorage.removeItem(AI_MODEL_KEY);
       aiConfigModal.style.display = 'none';
-      showToast('已清除本地配置的 Cloudflare 凭证', 'info');
+      showToast('已清除自定义 AI 配置，恢复默认', 'info');
       updatePreview();
     });
   }

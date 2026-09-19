@@ -114,8 +114,45 @@ Rules:
 
     let aiResultText = '';
 
-    // 1. Try Cloudflare Pages native Workers AI binding: env.AI
-    if (env && env.AI && typeof env.AI.run === 'function') {
+    // 1. If custom OpenAI-compatible API is provided, forward the request
+    const customApiUrl = (body.customApiUrl || '').trim();
+    const customApiKey = (body.customApiKey || '').trim();
+    const customModel = (body.customModel || '').trim() || 'gpt-4o-mini';
+
+    if (customApiUrl) {
+      try {
+        const customHeaders = {
+          'Content-Type': 'application/json',
+        };
+        if (customApiKey) {
+          customHeaders['Authorization'] = `Bearer ${customApiKey}`;
+        }
+        const customRes = await fetch(customApiUrl, {
+          method: 'POST',
+          headers: customHeaders,
+          body: JSON.stringify({
+            model: customModel,
+            messages,
+            temperature: 0.1,
+          }),
+        });
+
+        if (customRes.ok) {
+          const customData = await customRes.json();
+          if (customData.choices && customData.choices[0] && customData.choices[0].message) {
+            aiResultText = customData.choices[0].message.content;
+          }
+        } else {
+          const errText = await customRes.text();
+          console.error('Custom API proxy request failed:', errText);
+        }
+      } catch (proxyErr) {
+        console.error('Proxying custom API failed:', proxyErr);
+      }
+    }
+
+    // 2. Try native AI binding: env.AI
+    if (!aiResultText && env && env.AI && typeof env.AI.run === 'function') {
       try {
         const response = await env.AI.run(MODEL_ID, {
           messages,
@@ -137,7 +174,7 @@ Rules:
       }
     }
 
-    // 2. If env.AI wasn't available or failed, try Cloudflare REST API with credentials
+    // 3. Try REST API with credentials if env.AI not available
     if (!aiResultText) {
       const accountId = request.headers.get('X-CF-Account-ID') || (env && env.CLOUDFLARE_ACCOUNT_ID);
       const apiToken = request.headers.get('X-CF-API-Token') || (env && env.CLOUDFLARE_API_TOKEN);
@@ -166,7 +203,7 @@ Rules:
           }
         } else {
           const errText = await cfRes.text();
-          console.error('Cloudflare REST API failed:', errText);
+          console.error('REST API failed:', errText);
         }
       }
     }
@@ -175,8 +212,8 @@ Rules:
       return new Response(
         JSON.stringify({
           success: false,
-          model: MODEL_ID,
-          message: 'Workers AI binding (env.AI) or Cloudflare API Token not available. Client will use local rule-based parser.',
+          model: customModel || MODEL_ID,
+          message: 'AI service not available. Client will use local rule-based parser.',
         }),
         { status: 503, headers: corsHeaders }
       );

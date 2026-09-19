@@ -808,6 +808,36 @@ body {
   box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.15);
 }
 
+.api-presets-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 14px;
+}
+
+.api-presets-label {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+}
+
+.api-preset-chip {
+  background: var(--bg-hover);
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  font-size: 0.76rem;
+  padding: 3px 8px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.api-preset-chip:hover {
+  background: var(--primary-light);
+  color: var(--primary);
+  border-color: var(--primary-border);
+}
+
 /* Spinner */
 .spinner {
   width: 12px;

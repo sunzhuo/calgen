@@ -71,15 +71,15 @@
           输入日程文本
         </label>
         <div class="input-toggles">
-          <label class="toggle-item" title="使用 Cloudflare Workers AI @cf/google/gemma-4-26b-a4b-it 大模型深度解析">
+          <label class="toggle-item" title="使用 AI 大模型深度解析">
             <input type="checkbox" id="aiToggle" checked>
-            <span>Gemma 4 AI</span>
+            <span>AI</span>
           </label>
           <label class="toggle-item" title="输入完成或粘贴后自动生成并触发 .ics 文件下载">
             <input type="checkbox" id="autoDownloadToggle" checked>
             <span>自动下载 .ics</span>
           </label>
-          <button id="aiConfigBtn" type="button" class="btn-icon" title="配置 Cloudflare API Token (可选直连)">
+          <button id="aiConfigBtn" type="button" class="btn-icon" title="AI 配置 (自定义 API)">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <circle cx="12" cy="12" r="3"></circle>
               <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
@@ -123,7 +123,7 @@
               </svg>
               解析成功
             </span>
-            <span id="previewEngineBadge" class="engine-badge ai">🤖 Gemma 4 26B</span>
+            <span id="previewEngineBadge" class="engine-badge ai">🤖 AI</span>
           </div>
           <span id="previewStatus" style="font-size: 0.78rem; color: var(--text-muted);">准备就绪</span>
         </div>
@@ -221,30 +221,43 @@
   <!-- Toast Notification Container -->
   <div id="toastContainer" class="toast-container" aria-live="polite"></div>
 
-  <!-- Modal for optional Cloudflare Settings -->
+  <!-- Modal for AI Settings -->
   <div id="aiConfigModal" class="modal-backdrop" style="display: none;">
     <div class="modal-dialog">
       <div class="modal-header">
-        <h3>Cloudflare Workers AI 配置</h3>
+        <h3>AI 配置</h3>
         <button id="closeModalBtn" type="button" class="btn-close">&times;</button>
       </div>
       <div class="modal-body">
         <p style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 12px; line-height: 1.5;">
-          当前已配置使用 Cloudflare 托管的 <strong>@cf/google/gemma-4-26b-a4b-it</strong> 模型。<br>
-          • 部署在 Cloudflare Pages 时：绑定 <code>AI</code> 即可全自动免密调用。<br>
-          • 本地调试或直连时：您可在此输入 Cloudflare 凭证（仅保存在您的本地浏览器中）：
+          可添加任意兼容 OpenAI 规范的自定义 API 服务（如 DeepSeek、OpenAI、SiliconFlow、Ollama 等）。留空时将自动使用默认 AI 服务。
         </p>
+
+        <!-- Quick Presets -->
+        <div class="api-presets-row">
+          <span class="api-presets-label">快捷填入：</span>
+          <button type="button" class="api-preset-chip" data-url="https://api.deepseek.com/v1" data-model="deepseek-chat">DeepSeek</button>
+          <button type="button" class="api-preset-chip" data-url="https://api.openai.com/v1" data-model="gpt-4o-mini">OpenAI</button>
+          <button type="button" class="api-preset-chip" data-url="https://api.siliconflow.cn/v1" data-model="Qwen/Qwen2.5-7B-Instruct">SiliconFlow</button>
+          <button type="button" class="api-preset-chip" data-url="http://localhost:11434/v1" data-model="qwen2.5">Ollama</button>
+        </div>
+
         <div class="form-group">
-          <label for="cfAccountId">Cloudflare Account ID (选填)</label>
-          <input type="text" id="cfAccountId" class="form-input" placeholder="例如: 3e8b0b5... (32位十六进制字符)">
+          <label for="aiApiUrl">API 接口地址 (Base URL 或完整 Endpoint)</label>
+          <input type="text" id="aiApiUrl" class="form-input" placeholder="例如: https://api.deepseek.com/v1">
         </div>
         <div class="form-group">
-          <label for="cfApiToken">Cloudflare API Token (选填，具备 Workers AI 权限)</label>
-          <input type="password" id="cfApiToken" class="form-input" placeholder="例如: v8Wj_... 令牌">
+          <label for="aiApiKey">API 密钥 (API Key / Token)</label>
+          <input type="password" id="aiApiKey" class="form-input" placeholder="例如: sk-xxxxxxxx (选填，本地或反代服务可留空)">
+        </div>
+        <div class="form-group">
+          <label for="aiModel">模型名称 (Model)</label>
+          <input type="text" id="aiModel" class="form-input" placeholder="例如: deepseek-chat 或 gpt-4o-mini">
         </div>
       </div>
       <div class="modal-footer">
         <button id="clearConfigBtn" type="button" class="btn btn-secondary btn-sm">清除</button>
+        <button id="testConfigBtn" type="button" class="btn btn-secondary btn-sm">测试连接</button>
         <button id="saveConfigBtn" type="button" class="btn btn-primary btn-sm">保存并生效</button>
       </div>
     </div>
@@ -252,7 +265,7 @@
 
   <!-- Footer -->
   <footer class="footer">
-    <p>CalGen · 搭载 Cloudflare Workers AI (Gemma 4 26B) · 支持离线与 PWA 分享 · <a href="app/calgen.apk" download="calgen.apk" class="footer-link">下载 Android APK</a></p>
+    <p>CalGen · 搭载 AI 智能解析 · 支持离线与 PWA 分享 · <a href="app/calgen.apk" download="calgen.apk" class="footer-link">下载 Android APK</a></p>
   </footer>
 
   <script type="module" src="app.js"></script>

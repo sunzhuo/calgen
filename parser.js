@@ -761,7 +761,6 @@ export function parseScheduleText(text, referenceDate = new Date()) {
   };
 }
 
-export const GEMMA_MODEL_ID = '@cf/google/gemma-4-26b-a4b-it';
 export const DEFAULT_REMOTE_API = 'https://calgen.pages.dev/api/parse';
 
 /**
@@ -782,7 +781,7 @@ export function isRunningInNativeApp() {
 }
 
 /**
- * Get effective API endpoint for Gemma 4 AI parsing
+ * Get effective default API endpoint for built-in AI parsing
  * Automatically uses remote production endpoint when running in Capacitor APK or local origins
  */
 export function getEffectiveApiEndpoint(customEndpoint = '') {
@@ -802,73 +801,112 @@ export function getEffectiveApiEndpoint(customEndpoint = '') {
 }
 
 /**
- * Parse schedule using Cloudflare Workers AI model @cf/google/gemma-4-26b-a4b-it
- * @param {string} text
- * @param {Object} [options]
- * @returns {Promise<Object>}
+ * Generate calendar parsing system prompt with current reference date
  */
-export async function parseScheduleWithGemma(text, options = {}) {
-  const effectiveEndpoint = getEffectiveApiEndpoint(options.apiEndpoint);
-  const {
-    apiEndpoint = effectiveEndpoint,
-    accountId = '',
-    apiToken = '',
-    referenceDate = new Date(),
-    signal = null,
-    timeoutMs = 12000
-  } = options;
+export function getCalendarAISystemPrompt(referenceDate = new Date()) {
+  const pad = (n) => String(n).padStart(2, '0');
+  const yyyy = referenceDate.getFullYear();
+  const mm = pad(referenceDate.getMonth() + 1);
+  const dd = pad(referenceDate.getDate());
+  const hh = pad(referenceDate.getHours());
+  const min = pad(referenceDate.getMinutes());
+  const weekdays = ['周日(Sunday)', '周一(Monday)', '周二(Tuesday)', '周三(Wednesday)', '周四(Thursday)', '周五(Friday)', '周六(Saturday)'];
+  const currentWeekday = weekdays[referenceDate.getDay()];
+  const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia/Shanghai';
 
-  const headers = {
-    'Content-Type': 'application/json',
-  };
-  if (accountId) headers['X-CF-Account-ID'] = accountId;
-  if (apiToken) headers['X-CF-API-Token'] = apiToken;
+  return `You are an expert calendar assistant specialized in parsing schedule text into structured JSON.
+Current Reference Time: ${yyyy}-${mm}-${dd} ${hh}:${min} (${currentWeekday}), Timezone: ${timezone}.
 
-  const body = {
-    text: text.trim(),
-    clientTime: referenceDate.toISOString(),
-    timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia/Shanghai'
-  };
-
-  // Setup timeout controller
-  const timeoutController = new AbortController();
-  const timerId = setTimeout(() => {
-    timeoutController.abort(new Error('AI parse request timed out'));
-  }, timeoutMs);
-
-  let effectiveSignal = timeoutController.signal;
-  if (signal) {
-    if (typeof AbortSignal.any === 'function') {
-      effectiveSignal = AbortSignal.any([signal, timeoutController.signal]);
-    } else {
-      signal.addEventListener('abort', () => timeoutController.abort(signal.reason), { once: true });
-    }
+Extract the schedule event from the user's text and respond ONLY with a valid JSON object matching this schema:
+{
+  "title": "string (strictly concise core event noun phrase, e.g. 两个博士预答辩, 项目周会, 财务审计沟通会)",
+  "startTime": "string (ISO 8601 local date-time format YYYY-MM-DDTHH:mm:ss for the updated/new schedule)",
+  "endTime": "string (ISO 8601 local date-time format YYYY-MM-DDTHH:mm:ss for the updated/new schedule)",
+  "allDay": boolean,
+  "location": "string (physical location/room, or online meeting info like 腾讯会议 123-456-789, or empty string)",
+  "description": "string (original raw notes or details)",
+  "url": "string (meeting link or URL if mentioned, e.g. Tencent Meeting link https://meeting.tencent.com/dm/xxx, Zoom link, or empty string)",
+  "isModification": boolean,
+  "keepExistingLocation": boolean,
+  "targetCriteria": {
+    "titleKeywords": ["string"],
+    "originalDate": "string (YYYY-MM-DD if identifiable, or empty string)",
+    "originalTimeOfDay": "string (morning | afternoon | evening | empty string)"
   }
+}
 
-  let res;
-  try {
-    res = await fetch(apiEndpoint, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(body),
-      signal: effectiveSignal
-    });
-  } finally {
-    clearTimeout(timerId);
+Rules:
+1. Title Rules:
+   - The title MUST be an extremely concise, clean noun or noun phrase (名词或名词短语，如 "两个博士预答辩", "预答辩", "项目周会", "团队周会", "2026年Q3需求评审").
+   - If key participant quantities are part of the core subject (e.g. "两个博士"), combine them into the noun phrase: "两个博士预答辩".
+   - STRICTLY strip all recipient names and vocatives at the beginning (e.g. "孙卓，", "张老师：", "@所有人", "各位同事好").
+   - STRICTLY strip first-person subject prefixes and intent verbs (e.g. "我有...", "我们计划...", "打算...", "我想约你...").
+   - STRICTLY strip conversational question tags, availability checks, or polite closing queries at the end (e.g. "你有时间吧？", "你有空吗？", "方便吗？", "你能参加吗？", "收到请回复").
+   - STRICTLY strip announcement/notice boilerplate phrasing (e.g. "...安排如下", "...日程如下", "...通知如下", "...的通知", "关于召开...", "请各位老师预留时间参加", etc.).
+   - STRICTLY strip modification/reschedule connectors and reasons from title (e.g. "由于有老师...有课", "因此...时间改为...", "改为", "调整为"). The title must only be the core event name (e.g. "预答辩").
+   - Do NOT include dates, times, locations, emojis, or polite closing words in the title.
+2. Location Rules:
+   - Extract the physical location or room (e.g. "科技楼302", "315会议室", "主楼报告厅").
+   - NEVER include verbs or event names in location (e.g. "在科技楼302预答辩" -> location: "科技楼302").
+   - If it is an online meeting (e.g. Tencent Meeting / Zoom) and no physical location is given, set "location" to "腾讯会议 123-456-789" or "Zoom 123-456-789".
+3. Relative dates (e.g. 今天, 明天, 后天, 下周五, 本周三, 3天后) must be calculated strictly relative to Current Reference Time (${yyyy}-${mm}-${dd}).
+4. Modification / Reschedule Rules:
+   - If the user's text expresses an intent to change, update, or reschedule an existing or previously scheduled event (e.g. contains "改为", "改到", "调整为", "推迟", "提前", "原定...改..."):
+     * Set "isModification": true.
+     * Populate "targetCriteria":
+       - "titleKeywords": [core event name being modified, e.g. "预答辩"]
+       - "originalDate": ISO YYYY-MM-DD date of the original event before change.
+       - "originalTimeOfDay": "afternoon" if original was 下午, "morning" if 上午, "evening" if 晚上.
+     * If text indicates location remains the same (e.g. "地点不变", "原地点", "地点同上"), set "keepExistingLocation": true.
+     * Compute "startTime" and "endTime" strictly for the NEW rescheduled time.
+   - If not a reschedule, set "isModification": false, "keepExistingLocation": false, and "targetCriteria": null.
+5. If end time is not explicitly specified:
+   - If duration is mentioned, add duration to startTime.
+   - If no duration is mentioned and it's not allDay, default endTime to 1 hour after startTime.
+   - If allDay is true, startTime and endTime should have the same date with 00:00:00.
+6. Output MUST be strictly valid JSON without any markdown code fence blocks or extra explanation.`;
+}
+
+/**
+ * Normalize an API endpoint to standard /chat/completions URL
+ */
+export function normalizeChatCompletionsUrl(inputUrl = '') {
+  let url = (inputUrl || '').trim();
+  if (!url) return '';
+  url = url.replace(/\/+$/, '');
+
+  if (url.endsWith('/chat/completions') || url.endsWith('/api/parse')) {
+    return url;
   }
-
-  if (!res.ok) {
-    const errorData = await res.json().catch(() => ({}));
-    throw new Error(errorData.message || `API error ${res.status}`);
+  if (url.endsWith('/v1')) {
+    return `${url}/chat/completions`;
   }
+  return `${url}/v1/chat/completions`;
+}
 
-  const json = await res.json();
-  if (!json.success || !json.data) {
-    throw new Error(json.message || 'AI failed to parse schedule');
+/**
+ * Safely parse JSON from AI model response string
+ */
+export function extractJsonFromAiResponse(aiResultText) {
+  if (!aiResultText || typeof aiResultText !== 'string') {
+    throw new Error('AI 返回内容为空');
   }
+  const cleaned = aiResultText
+    .replace(/```(?:json)?/gi, '')
+    .replace(/```/g, '')
+    .trim();
 
-  const d = json.data;
+  const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
+  if (jsonMatch) {
+    return JSON.parse(jsonMatch[0]);
+  }
+  return JSON.parse(cleaned);
+}
 
+/**
+ * Build standard calendar event object from parsed AI JSON
+ */
+export function buildEventFromAiData(d, text, referenceDate = new Date()) {
   let startDate = d.startTime ? new Date(d.startTime) : new Date(referenceDate);
   if (isNaN(startDate.getTime())) {
     startDate = new Date(referenceDate);
@@ -895,7 +933,7 @@ export async function parseScheduleWithGemma(text, options = {}) {
     url: d.url || '',
     alarmMinutes: 15,
     createdAt: new Date().toISOString(),
-    parserType: 'gemma-4-26b-a4b-it',
+    parserType: 'ai',
     isModification: !!d.isModification,
     keepExistingLocation: !!d.keepExistingLocation,
     targetCriteria: d.targetCriteria || null
@@ -903,7 +941,213 @@ export async function parseScheduleWithGemma(text, options = {}) {
 }
 
 /**
- * Unified schedule parser: attempts Gemma 4 26B AI parsing first,
+ * Test connectivity for a custom OpenAI-compatible API
+ */
+export async function testAiConnection(options = {}) {
+  const { apiUrl = '', apiKey = '', model = '', timeoutMs = 10000 } = options;
+  if (!apiUrl || !apiUrl.trim()) {
+    throw new Error('请先填写 API 接口地址');
+  }
+
+  const endpoint = normalizeChatCompletionsUrl(apiUrl);
+  const targetModel = (model || '').trim() || 'gpt-4o-mini';
+
+  const headers = { 'Content-Type': 'application/json' };
+  if (apiKey && apiKey.trim()) {
+    headers['Authorization'] = `Bearer ${apiKey.trim()}`;
+  }
+
+  const testPayload = {
+    model: targetModel,
+    messages: [
+      { role: 'user', content: 'Say OK' }
+    ],
+    max_tokens: 16,
+    temperature: 0.1
+  };
+
+  const timeoutController = new AbortController();
+  const timerId = setTimeout(() => {
+    timeoutController.abort(new Error('请求超时'));
+  }, timeoutMs);
+
+  try {
+    const res = await fetch(endpoint, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(testPayload),
+      signal: timeoutController.signal
+    });
+
+    if (!res.ok) {
+      const errText = await res.text().catch(() => '');
+      throw new Error(`HTTP ${res.status}: ${errText.slice(0, 150)}`);
+    }
+
+    const data = await res.json();
+    if (!data.choices || !data.choices[0]) {
+      throw new Error('API 响应未返回标准 choices 字段');
+    }
+
+    return { success: true, message: '连接成功' };
+  } finally {
+    clearTimeout(timerId);
+  }
+}
+
+/**
+ * Parse schedule using AI (supports any custom OpenAI-compatible API or default built-in AI)
+ * @param {string} text
+ * @param {Object} [options]
+ * @returns {Promise<Object>}
+ */
+export async function parseScheduleWithAI(text, options = {}) {
+  const {
+    apiUrl = '',
+    apiKey = '',
+    model = '',
+    apiEndpoint = '',
+    accountId = '',
+    apiToken = '',
+    referenceDate = new Date(),
+    signal = null,
+    timeoutMs = 15000
+  } = options;
+
+  const trimmedText = (text || '').trim();
+  if (!trimmedText) {
+    throw new Error('日程文本不能为空');
+  }
+
+  const timeoutController = new AbortController();
+  const timerId = setTimeout(() => {
+    timeoutController.abort(new Error('AI 解析请求超时'));
+  }, timeoutMs);
+
+  let effectiveSignal = timeoutController.signal;
+  if (signal) {
+    if (typeof AbortSignal.any === 'function') {
+      effectiveSignal = AbortSignal.any([signal, timeoutController.signal]);
+    } else {
+      signal.addEventListener('abort', () => timeoutController.abort(signal.reason), { once: true });
+    }
+  }
+
+  try {
+    // 1. If custom API URL is configured, use OpenAI-compatible chat completions
+    if (apiUrl && apiUrl.trim()) {
+      const endpoint = normalizeChatCompletionsUrl(apiUrl);
+      const targetModel = (model || '').trim() || 'gpt-4o-mini';
+
+      const headers = {
+        'Content-Type': 'application/json'
+      };
+      if (apiKey && apiKey.trim()) {
+        headers['Authorization'] = `Bearer ${apiKey.trim()}`;
+      }
+
+      const body = {
+        model: targetModel,
+        messages: [
+          { role: 'system', content: getCalendarAISystemPrompt(referenceDate) },
+          { role: 'user', content: trimmedText }
+        ],
+        temperature: 0.1
+      };
+
+      let res;
+      try {
+        res = await fetch(endpoint, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify(body),
+          signal: effectiveSignal
+        });
+      } catch (fetchErr) {
+        // Fallback through proxy if browser CORS blocked it and server /api/parse is available
+        if (typeof window !== 'undefined' && !isRunningInNativeApp()) {
+          try {
+            const proxyRes = await fetch('/api/parse', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                text: trimmedText,
+                clientTime: referenceDate.toISOString(),
+                timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia/Shanghai',
+                customApiUrl: endpoint,
+                customApiKey: apiKey,
+                customModel: targetModel
+              }),
+              signal: effectiveSignal
+            });
+            if (proxyRes.ok) {
+              const proxyJson = await proxyRes.json();
+              if (proxyJson.success && proxyJson.data) {
+                return buildEventFromAiData(proxyJson.data, trimmedText, referenceDate);
+              }
+            }
+          } catch (proxyErr) {
+            // ignore proxy error
+          }
+        }
+        throw fetchErr;
+      }
+
+      if (!res.ok) {
+        const errorText = await res.text().catch(() => '');
+        throw new Error(`API 错误 (${res.status}): ${errorText.slice(0, 150)}`);
+      }
+
+      const json = await res.json();
+      const content = json.choices?.[0]?.message?.content || '';
+      const parsedData = extractJsonFromAiResponse(content);
+      return buildEventFromAiData(parsedData, trimmedText, referenceDate);
+    }
+
+    // 2. Otherwise, use built-in default endpoint (/api/parse or DEFAULT_REMOTE_API)
+    const effectiveEndpoint = getEffectiveApiEndpoint(apiEndpoint);
+    const headers = {
+      'Content-Type': 'application/json',
+    };
+    if (accountId) headers['X-CF-Account-ID'] = accountId;
+    if (apiToken) headers['X-CF-API-Token'] = apiToken;
+
+    const body = {
+      text: trimmedText,
+      clientTime: referenceDate.toISOString(),
+      timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia/Shanghai'
+    };
+
+    const res = await fetch(effectiveEndpoint, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(body),
+      signal: effectiveSignal
+    });
+
+    if (!res.ok) {
+      const errorData = await res.json().catch(() => ({}));
+      throw new Error(errorData.message || `API error ${res.status}`);
+    }
+
+    const json = await res.json();
+    if (!json.success || !json.data) {
+      throw new Error(json.message || 'AI failed to parse schedule');
+    }
+
+    return buildEventFromAiData(json.data, trimmedText, referenceDate);
+  } finally {
+    clearTimeout(timerId);
+  }
+}
+
+/**
+ * Backward compatibility alias
+ */
+export const parseScheduleWithGemma = parseScheduleWithAI;
+
+/**
+ * Unified schedule parser: attempts AI parsing first,
  * with immediate transparent fallback to rule-based parser.
  * @param {string} text
  * @param {Object} [options]
@@ -912,16 +1156,15 @@ export async function parseScheduleWithGemma(text, options = {}) {
 export async function parseScheduleTextAsync(text, options = {}) {
   if (!text || !text.trim()) return null;
 
-  // If useAi is explicitly disabled, directly use local parser
   if (options.useAi === false) {
     return parseScheduleText(text, options.referenceDate);
   }
 
   try {
-    const aiEvent = await parseScheduleWithGemma(text, options);
+    const aiEvent = await parseScheduleWithAI(text, options);
     return aiEvent;
   } catch (err) {
-    console.info('Gemma AI parsing unavailable or failed, fallback to local parser:', err.message);
+    console.info('AI parsing unavailable or failed, fallback to local parser:', err.message);
     return parseScheduleText(text, options.referenceDate);
   }
 }
