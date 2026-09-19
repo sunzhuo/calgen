@@ -173,6 +173,21 @@ export function getCalendarPlugin() {
 }
 
 /**
+ * Safely get custom NativeCalendar plugin instance if running inside APK
+ */
+export function getNativeCalendarPlugin() {
+  const cap = getCapacitor();
+  if (!cap) return null;
+  if (cap.Plugins && cap.Plugins.NativeCalendar) {
+    return cap.Plugins.NativeCalendar;
+  }
+  if (typeof cap.registerPlugin === 'function') {
+    return cap.registerPlugin('NativeCalendar');
+  }
+  return null;
+}
+
+/**
  * Check if the current environment is Android browser/OS
  */
 export function isAndroid() {
@@ -219,9 +234,58 @@ export function downloadICSFile(icsContent, filename = 'schedule.ics') {
  * - In Web browser: ONLY downloads standard .ics file using frontend Blob, with parsed event title as filename
  * @param {Object} event
  */
-export async function openCalendarEvent(event) {
+export async function openCalendarEvent(event, options = {}) {
   // 1. Native Capacitor environment (APK)
   if (isNativeApp()) {
+    const startMs = new Date(event.startTime).getTime();
+    let endMs = new Date(event.endTime).getTime();
+    if (!endMs || isNaN(endMs) || endMs <= startMs) {
+      endMs = startMs + (event.allDay ? 86400000 : 3600000);
+    }
+
+    const loc = event.location ? String(event.location).trim() : '';
+
+    // 双重兜底：针对国内定制 ROM（小米 HyperOS / 华为鸿蒙 / vivo / OPPO）在 eventLocation 无法匹配高德/百度 POI 时主动清空地点栏的问题
+    // 将地点一并追加到 description 顶部，即使外部应用有异常，用户依然能在日历详情中看到地点
+    const descParts = [];
+    if (loc) {
+      descParts.push(`地点：${loc}`);
+    }
+    if (event.description && event.description.trim()) {
+      const cleanDesc = event.description.trim();
+      if (!cleanDesc.startsWith(`地点：${loc}`) && !cleanDesc.startsWith(`地点: ${loc}`)) {
+        descParts.push(cleanDesc);
+      }
+    }
+    if (event.url && event.url.trim()) {
+      descParts.push(`链接：${event.url.trim()}`);
+    }
+    const finalDescription = descParts.join('\n\n');
+
+    // 优先方案 A：通过内置 NativeCalendarPlugin 直写 Android CalendarProvider (ContentResolver)
+    // 地点直接存入系统 SQLite 数据库，彻底绕过各厂商 ROM 对 ACTION_INSERT Intent 的 POI 校验与清空
+    const nativeDirect = getNativeCalendarPlugin();
+    if (nativeDirect && typeof nativeDirect.createAndOpenEvent === 'function') {
+      try {
+        const directRes = await nativeDirect.createAndOpenEvent({
+          title: event.title || '日程安排',
+          startTime: startMs,
+          endTime: endMs,
+          allDay: Boolean(event.allDay),
+          location: loc,
+          description: finalDescription,
+          alarmMinutes: event.alarmMinutes !== undefined ? event.alarmMinutes : 15,
+          openMode: options.openMode || 'view' // 'view' 打开详情查看，或 'edit' 打开编辑页
+        });
+        if (directRes && directRes.success) {
+          return { success: true, method: 'native_direct', eventId: directRes.eventId };
+        }
+      } catch (directErr) {
+        console.warn('NativeCalendar createAndOpenEvent failed, falling back to prompt:', directErr);
+      }
+    }
+
+    // 备选方案 B：降级使用 @capgo/capacitor-calendar 插件唤起 Intent
     const calendarPlugin = getCalendarPlugin();
     if (calendarPlugin) {
       try {
@@ -233,31 +297,6 @@ export async function openCalendarEvent(event) {
         } catch (permErr) {
           console.warn('Calendar permission prompt:', permErr);
         }
-
-        const startMs = new Date(event.startTime).getTime();
-        let endMs = new Date(event.endTime).getTime();
-        if (!endMs || isNaN(endMs) || endMs <= startMs) {
-          endMs = startMs + (event.allDay ? 86400000 : 3600000);
-        }
-
-        const loc = event.location ? String(event.location).trim() : '';
-
-        // 双重兜底：针对国内定制 ROM（小米 HyperOS / 华为鸿蒙 / vivo / OPPO）在 eventLocation 无法匹配高德/百度 POI 时主动清空地点栏的问题
-        // 将地点一并追加到 description 顶部，即使地点栏被清空，用户依然能在日历详情中看到地点
-        const descParts = [];
-        if (loc) {
-          descParts.push(`地点：${loc}`);
-        }
-        if (event.description && event.description.trim()) {
-          const cleanDesc = event.description.trim();
-          if (!cleanDesc.startsWith(`地点：${loc}`) && !cleanDesc.startsWith(`地点: ${loc}`)) {
-            descParts.push(cleanDesc);
-          }
-        }
-        if (event.url && event.url.trim()) {
-          descParts.push(`链接：${event.url.trim()}`);
-        }
-        const finalDescription = descParts.join('\n\n');
 
         // Launch native system calendar event creation UI with prefilled fields
         await calendarPlugin.createEventWithPrompt({
@@ -273,7 +312,7 @@ export async function openCalendarEvent(event) {
           address: loc,
           description: finalDescription
         });
-        return { success: true, method: 'capacitor' };
+        return { success: true, method: 'capacitor_prompt' };
       } catch (err) {
         console.warn('createEventWithPrompt error, attempting fallback to openCalendar:', err);
         try {

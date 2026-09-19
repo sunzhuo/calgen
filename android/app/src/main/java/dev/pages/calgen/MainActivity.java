@@ -44,6 +44,7 @@ public class MainActivity extends BridgeActivity {
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
+        registerPlugin(NativeCalendarPlugin.class);
         super.onCreate(savedInstanceState);
         handleIncomingIntent(getIntent());
     }

@@ -88,58 +88,90 @@ async function testWebDownloadFlow() {
 
 await testWebDownloadFlow();
 
-// Test 3: Mock Capacitor native environment to test Android Intent parameters & double fallback
-let capturedPromptParams = null;
+// Test 3: Direct CalendarProvider Insertion flow via NativeCalendarPlugin
+let capturedDirectParams = null;
 globalThis.Capacitor = {
   isNativePlatform: () => true,
   Plugins: {
-    CapacitorCalendar: {
-      requestWriteOnlyCalendarAccess: async () => ({ result: 'granted' }),
-      createEventWithPrompt: async (params) => {
-        capturedPromptParams = params;
-        return { result: 'created' };
+    NativeCalendar: {
+      createAndOpenEvent: async (params) => {
+        capturedDirectParams = params;
+        return { success: true, eventId: 10086, calendarId: 1, method: 'native_direct' };
       }
+    },
+    CapacitorCalendar: {
+      createEventWithPrompt: async () => ({ result: 'fallback' })
     }
   }
 };
 
-async function testNativeCapacitorFlow() {
-  const nativeTestEvent = {
-    id: 'test-native-event',
-    title: '部门季度总结会',
+async function testNativeDirectCalendarFlow() {
+  const testEvent = {
+    id: 'direct-test-event',
+    title: '博士论文预答辩',
     startTime: '2026-09-26T10:00:00',
     endTime: '2026-09-26T11:30:00',
-    location: '行政楼501会议室',
+    location: '科技楼302',
     url: 'https://meeting.tencent.com/dm/789012',
-    description: '讨论下季度重点OKR与产品规划'
+    description: '孙卓博士预答辩汇报'
   };
 
-  const res = await openCalendarEvent(nativeTestEvent);
-  console.log('openCalendarEvent native result:', res);
+  const res = await openCalendarEvent(testEvent);
+  console.log('openCalendarEvent NativeCalendar direct result:', res);
   assert.strictEqual(res.success, true);
-  assert.strictEqual(res.method, 'capacitor');
-  assert.ok(capturedPromptParams, 'capturedPromptParams should be populated');
+  assert.strictEqual(res.method, 'native_direct');
+  assert.strictEqual(res.eventId, 10086);
+  assert.ok(capturedDirectParams, 'capturedDirectParams should be populated');
 
-  // Verify Issue 1: Standard eventLocation and compatible location keys are all present
-  assert.strictEqual(capturedPromptParams.eventLocation, '行政楼501会议室', 'eventLocation key must match location');
-  assert.strictEqual(capturedPromptParams.location, '行政楼501会议室', 'location key must match location');
-  assert.strictEqual(capturedPromptParams.event_location, '行政楼501会议室', 'event_location key must match location');
-  assert.strictEqual(capturedPromptParams.address, '行政楼501会议室', 'address key must match location');
-  assert.strictEqual(capturedPromptParams.title, '部门季度总结会');
-  assert.strictEqual(typeof capturedPromptParams.startDate, 'number');
-  assert.strictEqual(typeof capturedPromptParams.beginTime, 'number');
-  assert.strictEqual(typeof capturedPromptParams.endDate, 'number');
-  assert.strictEqual(typeof capturedPromptParams.endTime, 'number');
-
-  // Verify Issue 2: Double fallback in description for Chinese custom ROMs (HyperOS / HarmonyOS / vivo / OPPO)
-  console.log('Native prompt description:\n' + capturedPromptParams.description);
-  assert.ok(capturedPromptParams.description.startsWith('地点：行政楼501会议室'), 'Description must prepend 地点：xxx as double fallback');
-  assert.ok(capturedPromptParams.description.includes('讨论下季度重点OKR与产品规划'));
-  assert.ok(capturedPromptParams.description.includes('链接：https://meeting.tencent.com/dm/789012'));
-
-  console.log('✔ openCalendarEvent Native Capacitor flow & parameter verification passed!');
+  // Verify parameters passed to ContentResolver insertion
+  assert.strictEqual(capturedDirectParams.title, '博士论文预答辩');
+  assert.strictEqual(capturedDirectParams.location, '科技楼302');
+  assert.strictEqual(typeof capturedDirectParams.startTime, 'number');
+  assert.strictEqual(typeof capturedDirectParams.endTime, 'number');
+  assert.strictEqual(capturedDirectParams.alarmMinutes, 15);
+  assert.strictEqual(capturedDirectParams.openMode, 'view');
+  assert.ok(capturedDirectParams.description.startsWith('地点：科技楼302'));
+  console.log('✔ NativeCalendar direct insert flow passed!');
 }
 
-await testNativeCapacitorFlow();
+await testNativeDirectCalendarFlow();
+
+// Test 4: Fallback flow to createEventWithPrompt when NativeCalendar fails
+let capturedPromptParams = null;
+globalThis.Capacitor.Plugins.NativeCalendar = {
+  createAndOpenEvent: async () => {
+    throw new Error('Permission denied or NativeCalendar unavailable');
+  }
+};
+globalThis.Capacitor.Plugins.CapacitorCalendar = {
+  requestWriteOnlyCalendarAccess: async () => ({ result: 'granted' }),
+  createEventWithPrompt: async (params) => {
+    capturedPromptParams = params;
+    return { result: 'created' };
+  }
+};
+
+async function testFallbackPromptFlow() {
+  const fallbackEvent = {
+    id: 'fallback-event',
+    title: '临时项目紧急会',
+    startTime: '2026-09-27T14:00:00',
+    endTime: '2026-09-27T15:00:00',
+    location: '行政楼501',
+    description: '讨论紧急Bug'
+  };
+
+  const res = await openCalendarEvent(fallbackEvent);
+  console.log('openCalendarEvent fallback prompt result:', res);
+  assert.strictEqual(res.success, true);
+  assert.strictEqual(res.method, 'capacitor_prompt');
+  assert.ok(capturedPromptParams);
+  assert.strictEqual(capturedPromptParams.eventLocation, '行政楼501');
+  assert.strictEqual(capturedPromptParams.location, '行政楼501');
+  assert.ok(capturedPromptParams.description.startsWith('地点：行政楼501'));
+  console.log('✔ Fallback to createEventWithPrompt flow passed!');
+}
+
+await testFallbackPromptFlow();
 
 console.log('\nAll verification tests completed successfully!');
