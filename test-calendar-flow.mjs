@@ -200,4 +200,66 @@ async function testFallbackPromptFlow() {
 
 await testFallbackPromptFlow();
 
+// Test 6: User clicks "修改信息" (editRequested flow)
+globalThis.Capacitor.Plugins.NativeCalendar = {
+  createAndOpenEvent: async (params) => {
+    return { success: false, editRequested: true };
+  }
+};
+
+async function testNativeEditRequestedFlow() {
+  const eventToEdit = {
+    id: 'edit-test-event',
+    title: '周一例会',
+    startTime: '2026-09-28T09:00:00',
+    endTime: '2026-09-28T10:00:00',
+    location: '会议室',
+    description: '讨论周目标'
+  };
+
+  const res = await openCalendarEvent(eventToEdit);
+  console.log('openCalendarEvent editRequested result:', res);
+  assert.strictEqual(res.success, false);
+  assert.strictEqual(res.editRequested, true);
+  console.log('✔ Native editRequested handled cleanly without fallback or insertion!');
+}
+
+await testNativeEditRequestedFlow();
+
+// Test 7: Save and directly insert edited event (with skipConfirm: true)
+capturedDirectParams = null;
+globalThis.Capacitor.Plugins.NativeCalendar = {
+  createAndOpenEvent: async (params) => {
+    capturedDirectParams = params;
+    return { success: true, eventId: 8888 };
+  }
+};
+
+async function testModifiedEventDirectInsertFlow() {
+  const modifiedEvent = {
+    id: 'modified-event',
+    title: '修改后的项目架构研讨会',
+    startTime: '2026-09-28T14:30:00',
+    endTime: '2026-09-28T16:30:00',
+    allDay: false,
+    location: '科技园区B座801国际会议厅',
+    description: '讨论新架构落地细节',
+    alarmMinutes: 30
+  };
+
+  const res = await openCalendarEvent(modifiedEvent, { skipConfirm: true });
+  console.log('openCalendarEvent modified direct insert result:', res);
+  assert.strictEqual(res.success, true);
+  assert.strictEqual(res.method, 'native_direct');
+  assert.strictEqual(res.eventId, 8888);
+  assert.ok(capturedDirectParams);
+  assert.strictEqual(capturedDirectParams.title, '修改后的项目架构研讨会');
+  assert.strictEqual(capturedDirectParams.location, '科技园区B座801国际会议厅');
+  assert.strictEqual(capturedDirectParams.alarmMinutes, 30);
+  assert.strictEqual(capturedDirectParams.skipConfirm, true);
+  console.log('✔ Modified event direct insertion with skipConfirm passed!');
+}
+
+await testModifiedEventDirectInsertFlow();
+
 console.log('\nAll verification tests completed successfully!');

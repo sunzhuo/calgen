@@ -186,6 +186,13 @@ public class NativeCalendarPlugin extends Plugin {
                         executeInsertAndOpen(call, finalTitle, finalStartTime, finalEndTime, finalAllDay, finalLocation, finalDescription, finalAlarmMinutes, finalOpenMode);
                     });
 
+                    builder.setNeutralButton("修改信息", (dialog, which) -> {
+                        JSObject ret = new JSObject();
+                        ret.put("success", false);
+                        ret.put("editRequested", true);
+                        call.resolve(ret);
+                    });
+
                     builder.setNegativeButton("取消", (dialog, which) -> {
                         JSObject ret = new JSObject();
                         ret.put("success", false);

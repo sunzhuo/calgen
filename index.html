@@ -125,7 +125,16 @@
             </span>
             <span id="previewEngineBadge" class="engine-badge ai">🤖 AI</span>
           </div>
-          <span id="previewStatus" style="font-size: 0.78rem; color: var(--text-muted);">准备就绪</span>
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <span id="previewStatus" style="font-size: 0.78rem; color: var(--text-muted);">准备就绪</span>
+            <button id="previewEditBtn" type="button" class="btn-icon-text" title="修改日程各部分信息">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M12 20h9"></path>
+                <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path>
+              </svg>
+              修改
+            </button>
+          </div>
         </div>
         <div id="previewModBanner" class="preview-mod-banner" style="display: none;"></div>
         <div id="previewTitle" class="preview-title">日程标题</div>
@@ -259,6 +268,91 @@
         <button id="clearConfigBtn" type="button" class="btn btn-secondary btn-sm">清除</button>
         <button id="testConfigBtn" type="button" class="btn btn-secondary btn-sm">测试连接</button>
         <button id="saveConfigBtn" type="button" class="btn btn-primary btn-sm">保存并生效</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal for Editing Event Details -->
+  <div id="editEventModal" class="modal-backdrop" style="display: none;">
+    <div class="modal-dialog modal-dialog-lg">
+      <div class="modal-header">
+        <h3 id="editEventModalTitle">修改日程详情</h3>
+        <button id="closeEditModalBtn" type="button" class="btn-close">&times;</button>
+      </div>
+      <div class="modal-body">
+        <form id="editEventForm" onsubmit="return false;">
+          <div class="form-group">
+            <label for="editEventTitle">日程标题 *</label>
+            <input type="text" id="editEventTitle" class="form-input" placeholder="输入日程标题" required>
+          </div>
+
+          <div class="form-group" style="margin-bottom: 10px;">
+            <label class="toggle-item-switch">
+              <input type="checkbox" id="editEventAllDay">
+              <span class="switch-slider"></span>
+              <span class="switch-label">全天日程</span>
+            </label>
+          </div>
+
+          <div class="form-grid-2">
+            <div class="form-group">
+              <label for="editEventStartTime" id="editEventStartTimeLabel">开始时间 *</label>
+              <input type="datetime-local" id="editEventStartTime" class="form-input" required>
+            </div>
+            <div class="form-group">
+              <label for="editEventEndTime" id="editEventEndTimeLabel">结束时间 *</label>
+              <input type="datetime-local" id="editEventEndTime" class="form-input" required>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label for="editEventLocation">地点</label>
+            <div class="input-with-icon">
+              <svg class="input-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path>
+                <circle cx="12" cy="10" r="3"></circle>
+              </svg>
+              <input type="text" id="editEventLocation" class="form-input" placeholder="例如：3楼大会议室、科技楼302">
+            </div>
+          </div>
+
+          <div class="form-grid-2">
+            <div class="form-group">
+              <label for="editEventAlarm">提前提醒</label>
+              <select id="editEventAlarm" class="form-input form-select">
+                <option value="0">不提醒</option>
+                <option value="1">事件发生时</option>
+                <option value="5">提前 5 分钟</option>
+                <option value="15" selected>提前 15 分钟 (推荐)</option>
+                <option value="30">提前 30 分钟</option>
+                <option value="60">提前 1 小时</option>
+                <option value="120">提前 2 小时</option>
+                <option value="1440">提前 1 天</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="editEventUrl">会议/网页链接</label>
+              <input type="url" id="editEventUrl" class="form-input" placeholder="例如：https://meeting.tencent.com/...">
+            </div>
+          </div>
+
+          <div class="form-group" style="margin-bottom: 0;">
+            <label for="editEventDescription">备注 / 详细描述</label>
+            <textarea id="editEventDescription" class="form-input form-textarea" rows="3" placeholder="可选备注信息"></textarea>
+          </div>
+        </form>
+      </div>
+      <div class="modal-footer modal-footer-between">
+        <button id="editEventCancelBtn" type="button" class="btn btn-secondary btn-sm">取消</button>
+        <div style="display: flex; gap: 8px;">
+          <button id="editEventSaveOnlyBtn" type="button" class="btn btn-secondary btn-sm">仅保存</button>
+          <button id="editEventConfirmBtn" type="button" class="btn btn-primary btn-sm">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polyline points="20 6 9 17 4 12"></polyline>
+            </svg>
+            <span id="editEventConfirmBtnText">保存并加入日历</span>
+          </button>
+        </div>
       </div>
     </div>
   </div>

@@ -59,6 +59,32 @@ const aiApiUrlInput = document.getElementById('aiApiUrl');
 const aiApiKeyInput = document.getElementById('aiApiKey');
 const aiModelInput = document.getElementById('aiModel');
 
+// Preview & Edit Event Modal Elements
+const previewEditBtn = document.getElementById('previewEditBtn');
+const editEventModal = document.getElementById('editEventModal');
+const editEventModalTitle = document.getElementById('editEventModalTitle');
+const closeEditModalBtn = document.getElementById('closeEditModalBtn');
+const editEventTitle = document.getElementById('editEventTitle');
+const editEventAllDay = document.getElementById('editEventAllDay');
+const editEventStartTime = document.getElementById('editEventStartTime');
+const editEventStartTimeLabel = document.getElementById('editEventStartTimeLabel');
+const editEventEndTime = document.getElementById('editEventEndTime');
+const editEventEndTimeLabel = document.getElementById('editEventEndTimeLabel');
+const editEventLocation = document.getElementById('editEventLocation');
+const editEventAlarm = document.getElementById('editEventAlarm');
+const editEventUrl = document.getElementById('editEventUrl');
+const editEventDescription = document.getElementById('editEventDescription');
+const editEventCancelBtn = document.getElementById('editEventCancelBtn');
+const editEventSaveOnlyBtn = document.getElementById('editEventSaveOnlyBtn');
+const editEventConfirmBtn = document.getElementById('editEventConfirmBtn');
+const editEventConfirmBtnText = document.getElementById('editEventConfirmBtnText');
+
+// Edit Modal State
+let currentEditingEvent = null;
+let currentEditingSource = 'preview';
+let currentEditingScheduleId = null;
+let currentPreviewEvent = null;
+
 /**
  * Show a toast notification
  * @param {string} message
@@ -286,6 +312,13 @@ function renderSchedulesList() {
           </svg>
           复制
         </button>
+        <button type="button" class="btn btn-secondary btn-sm edit-btn" data-id="${item.id}" title="修改日程各部分信息">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M12 20h9"></path>
+            <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path>
+          </svg>
+          编辑
+        </button>
         <button type="button" class="btn btn-primary btn-sm redownload-btn" data-id="${item.id}">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
@@ -413,7 +446,217 @@ function displayInPreview(event, isAi = false, isPending = false) {
     }
   }
 
+  currentPreviewEvent = event;
   previewCard.classList.add('show');
+}
+
+/**
+ * Convert timestamp or ISO string to local YYYY-MM-DDTHH:mm for datetime-local input
+ */
+function toLocalDatetimeString(val) {
+  const d = new Date(val);
+  if (isNaN(d.getTime())) return '';
+  const pad = (n) => String(n).padStart(2, '0');
+  const y = d.getFullYear();
+  const m = pad(d.getMonth() + 1);
+  const day = pad(d.getDate());
+  const h = pad(d.getHours());
+  const min = pad(d.getMinutes());
+  return `${y}-${m}-${day}T${h}:${min}`;
+}
+
+/**
+ * Convert timestamp or ISO string to local YYYY-MM-DD for date input
+ */
+function toLocalDateString(val) {
+  const d = new Date(val);
+  if (isNaN(d.getTime())) return '';
+  const pad = (n) => String(n).padStart(2, '0');
+  const y = d.getFullYear();
+  const m = pad(d.getMonth() + 1);
+  const day = pad(d.getDate());
+  return `${y}-${m}-${day}`;
+}
+
+/**
+ * Open the edit event modal prefilled with event fields
+ * @param {Object} event - the parsed or stored event
+ * @param {'preview'|'list'} source - where the edit was triggered from
+ * @param {string|null} scheduleId - existing schedule ID if from list
+ */
+function openEditModal(event, source = 'preview', scheduleId = null) {
+  if (!event) return;
+  currentEditingEvent = { ...event };
+  currentEditingSource = source;
+  currentEditingScheduleId = scheduleId || event.id || null;
+
+  if (editEventModalTitle) {
+    editEventModalTitle.textContent = source === 'preview' ? '修改解析日程' : '编辑日程信息';
+  }
+  if (editEventConfirmBtnText) {
+    editEventConfirmBtnText.textContent = isNativeApp() ? '保存并加入日历' : '保存并下载 .ics';
+  }
+
+  if (editEventTitle) {
+    editEventTitle.value = event.title || '';
+  }
+
+  const isAllDay = Boolean(event.allDay);
+  if (editEventAllDay) {
+    editEventAllDay.checked = isAllDay;
+  }
+
+  if (isAllDay) {
+    if (editEventStartTime) {
+      editEventStartTime.type = 'date';
+      editEventStartTime.value = toLocalDateString(event.startTime);
+    }
+    if (editEventEndTime) {
+      editEventEndTime.type = 'date';
+      editEventEndTime.value = toLocalDateString(event.endTime || event.startTime);
+    }
+    if (editEventStartTimeLabel) editEventStartTimeLabel.textContent = '开始日期 *';
+    if (editEventEndTimeLabel) editEventEndTimeLabel.textContent = '结束日期 *';
+  } else {
+    if (editEventStartTime) {
+      editEventStartTime.type = 'datetime-local';
+      editEventStartTime.value = toLocalDatetimeString(event.startTime);
+    }
+    if (editEventEndTime) {
+      editEventEndTime.type = 'datetime-local';
+      const end = event.endTime || (new Date(event.startTime).getTime() + 3600000);
+      editEventEndTime.value = toLocalDatetimeString(end);
+    }
+    if (editEventStartTimeLabel) editEventStartTimeLabel.textContent = '开始时间 *';
+    if (editEventEndTimeLabel) editEventEndTimeLabel.textContent = '结束时间 *';
+  }
+
+  if (editEventLocation) {
+    editEventLocation.value = event.location || '';
+  }
+  if (editEventAlarm) {
+    editEventAlarm.value = String(event.alarmMinutes !== undefined ? event.alarmMinutes : 15);
+  }
+  if (editEventUrl) {
+    editEventUrl.value = event.url || '';
+  }
+  if (editEventDescription) {
+    editEventDescription.value = event.description || '';
+  }
+
+  if (editEventModal) {
+    editEventModal.style.display = 'flex';
+  }
+}
+
+/**
+ * Close the edit event modal
+ */
+function closeEditModal() {
+  if (editEventModal) {
+    editEventModal.style.display = 'none';
+  }
+  currentEditingEvent = null;
+  currentEditingSource = null;
+  currentEditingScheduleId = null;
+}
+
+/**
+ * Save user edits from the modal
+ * @param {boolean} addToCalendar - whether to immediately add to system calendar or download .ics
+ */
+async function saveEditedEvent(addToCalendar = false) {
+  if (!currentEditingEvent) return;
+  const title = editEventTitle ? editEventTitle.value.trim() : '';
+  if (!title) {
+    showToast('请输入日程标题', 'info');
+    if (editEventTitle) editEventTitle.focus();
+    return;
+  }
+
+  const isAllDay = editEventAllDay ? editEventAllDay.checked : false;
+  const startVal = editEventStartTime ? editEventStartTime.value : '';
+  const endVal = editEventEndTime ? editEventEndTime.value : '';
+
+  if (!startVal) {
+    showToast(isAllDay ? '请选择开始日期' : '请选择开始时间', 'info');
+    if (editEventStartTime) editEventStartTime.focus();
+    return;
+  }
+
+  let startTimeIso = '';
+  let endTimeIso = '';
+
+  if (isAllDay) {
+    startTimeIso = `${startVal}T00:00:00`;
+    endTimeIso = endVal ? `${endVal}T23:59:59` : `${startVal}T23:59:59`;
+  } else {
+    startTimeIso = startVal.length === 16 ? `${startVal}:00` : startVal;
+    endTimeIso = endVal ? (endVal.length === 16 ? `${endVal}:00` : endVal) : '';
+  }
+
+  const startMs = new Date(startTimeIso).getTime();
+  let endMs = endTimeIso ? new Date(endTimeIso).getTime() : 0;
+
+  if (isNaN(startMs)) {
+    showToast('开始时间格式无效', 'danger');
+    return;
+  }
+
+  if (isNaN(endMs) || endMs <= startMs) {
+    endMs = startMs + (isAllDay ? 86400000 : 3600000);
+    endTimeIso = new Date(endMs).toISOString();
+  }
+
+  const location = editEventLocation ? editEventLocation.value.trim() : '';
+  const alarmMinutes = editEventAlarm ? parseInt(editEventAlarm.value, 10) : 15;
+  const url = editEventUrl ? editEventUrl.value.trim() : '';
+  const description = editEventDescription ? editEventDescription.value.trim() : '';
+
+  const eventId = currentEditingScheduleId || currentEditingEvent.id || (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : 'sched_' + Date.now());
+
+  const updatedEvent = {
+    ...currentEditingEvent,
+    id: eventId,
+    title: title,
+    startTime: startTimeIso,
+    endTime: endTimeIso,
+    allDay: isAllDay,
+    location: location,
+    alarmMinutes: isNaN(alarmMinutes) ? 15 : alarmMinutes,
+    url: url,
+    description: description,
+    isModified: true,
+    updatedAt: new Date().toISOString()
+  };
+
+  // Update schedules list in localStorage
+  const existingIdx = schedules.findIndex(s => s.id === updatedEvent.id);
+  if (existingIdx !== -1) {
+    schedules[existingIdx] = updatedEvent;
+  } else {
+    schedules.unshift(updatedEvent);
+  }
+  saveSchedules();
+  renderSchedulesList();
+
+  // Update preview card if active
+  latestAiEvent = updatedEvent;
+  currentPreviewEvent = updatedEvent;
+  displayInPreview(updatedEvent, updatedEvent.parserType === 'ai', false);
+
+  closeEditModal();
+
+  if (addToCalendar) {
+    const calRes = await openCalendarEvent(updatedEvent, { skipConfirm: true });
+    if (calRes && calRes.cancelled) {
+      showToast('已取消加入系统日历', 'info');
+    } else {
+      showToast(isNativeApp() ? `已确认并加入系统日历: ${updatedEvent.title}` : `已下载 .ics 文件: ${updatedEvent.title}`, 'success');
+    }
+  } else {
+    showToast(`已保存修改: ${updatedEvent.title}`, 'success');
+  }
 }
 
 /**
@@ -654,6 +897,12 @@ async function processAndGenerate(text, triggerDownload = true, force = false) {
     const calRes = await openCalendarEvent(event);
     if (calRes && calRes.cancelled) {
       showToast('已取消加入系统日历', 'info');
+      resetGenerateBtn();
+      isPausedByUser = false;
+      return event;
+    }
+    if (calRes && calRes.editRequested) {
+      openEditModal(event, 'preview');
       resetGenerateBtn();
       isPausedByUser = false;
       return event;
@@ -901,6 +1150,16 @@ function setupListeners() {
       return;
     }
 
+    const editBtn = e.target.closest('.edit-btn');
+    if (editBtn) {
+      const id = editBtn.getAttribute('data-id');
+      const item = schedules.find(s => s.id === id);
+      if (item) {
+        openEditModal(item, 'list', item.id);
+      }
+      return;
+    }
+
     const redownloadBtn = e.target.closest('.redownload-btn');
     if (redownloadBtn) {
       const id = redownloadBtn.getAttribute('data-id');
@@ -909,6 +1168,8 @@ function setupListeners() {
         openCalendarEvent(item).then((res) => {
           if (res && res.cancelled) {
             showToast('已取消加入系统日历', 'info');
+          } else if (res && res.editRequested) {
+            openEditModal(item, 'list', item.id);
           } else {
             showToast(isNativeApp() ? `已确认并加入系统日历: ${item.title}` : `已下载 .ics 文件: ${item.title}`, 'success');
           }
@@ -959,6 +1220,86 @@ function setupListeners() {
       showToast('已清空全部日程', 'info');
     }
   });
+
+  // Preview Edit button
+  if (previewEditBtn) {
+    previewEditBtn.addEventListener('click', () => {
+      const eventToEdit = currentPreviewEvent || latestAiEvent || (scheduleInput.value.trim() ? parseScheduleText(scheduleInput.value.trim()) : null);
+      if (eventToEdit) {
+        openEditModal(eventToEdit, 'preview');
+      } else {
+        showToast('暂无可修改的解析结果', 'info');
+      }
+    });
+  }
+
+  // Edit Modal Event Listeners
+  if (closeEditModalBtn) {
+    closeEditModalBtn.addEventListener('click', closeEditModal);
+  }
+  if (editEventCancelBtn) {
+    editEventCancelBtn.addEventListener('click', closeEditModal);
+  }
+  if (editEventModal) {
+    editEventModal.addEventListener('click', (e) => {
+      if (e.target === editEventModal) {
+        closeEditModal();
+      }
+    });
+  }
+
+  if (editEventSaveOnlyBtn) {
+    editEventSaveOnlyBtn.addEventListener('click', () => {
+      saveEditedEvent(false);
+    });
+  }
+  if (editEventConfirmBtn) {
+    editEventConfirmBtn.addEventListener('click', () => {
+      saveEditedEvent(true);
+    });
+  }
+
+  if (editEventAllDay) {
+    editEventAllDay.addEventListener('change', (e) => {
+      const isAllDay = e.target.checked;
+      if (isAllDay) {
+        const curStart = editEventStartTime ? editEventStartTime.value : '';
+        const curEnd = editEventEndTime ? editEventEndTime.value : '';
+        if (editEventStartTime) editEventStartTime.type = 'date';
+        if (editEventEndTime) editEventEndTime.type = 'date';
+        if (editEventStartTimeLabel) editEventStartTimeLabel.textContent = '开始日期 *';
+        if (editEventEndTimeLabel) editEventEndTimeLabel.textContent = '结束日期 *';
+        if (editEventStartTime) editEventStartTime.value = curStart ? curStart.substring(0, 10) : toLocalDateString(Date.now());
+        if (editEventEndTime) editEventEndTime.value = curEnd ? curEnd.substring(0, 10) : (editEventStartTime ? editEventStartTime.value : '');
+      } else {
+        const curStart = editEventStartTime ? editEventStartTime.value : '';
+        const curEnd = editEventEndTime ? editEventEndTime.value : '';
+        if (editEventStartTime) editEventStartTime.type = 'datetime-local';
+        if (editEventEndTime) editEventEndTime.type = 'datetime-local';
+        if (editEventStartTimeLabel) editEventStartTimeLabel.textContent = '开始时间 *';
+        if (editEventEndTimeLabel) editEventEndTimeLabel.textContent = '结束时间 *';
+        if (editEventStartTime) editEventStartTime.value = curStart ? (curStart.includes('T') ? curStart : `${curStart}T09:00`) : toLocalDatetimeString(Date.now());
+        if (editEventEndTime) editEventEndTime.value = curEnd ? (curEnd.includes('T') ? curEnd : `${curEnd}T10:00`) : toLocalDatetimeString(Date.now() + 3600000);
+      }
+    });
+  }
+
+  if (editEventStartTime) {
+    editEventStartTime.addEventListener('change', () => {
+      const isAllDay = editEventAllDay ? editEventAllDay.checked : false;
+      if (isAllDay) {
+        if (editEventEndTime && (!editEventEndTime.value || editEventEndTime.value < editEventStartTime.value)) {
+          editEventEndTime.value = editEventStartTime.value;
+        }
+      } else {
+        const sMs = new Date(editEventStartTime.value).getTime();
+        const eMs = editEventEndTime ? new Date(editEventEndTime.value).getTime() : 0;
+        if (isNaN(eMs) || eMs <= sMs) {
+          if (editEventEndTime) editEventEndTime.value = toLocalDatetimeString(sMs + 3600000);
+        }
+      }
+    });
+  }
 
   // Periodic cleanup check when tab is visible
   document.addEventListener('visibilitychange', () => {

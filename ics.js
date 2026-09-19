@@ -281,6 +281,9 @@ export async function openCalendarEvent(event, options = {}) {
         if (directRes && directRes.cancelled) {
           return { success: false, cancelled: true };
         }
+        if (directRes && directRes.editRequested) {
+          return { success: false, editRequested: true };
+        }
         if (directRes && directRes.success) {
           return { success: true, method: 'native_direct', eventId: directRes.eventId };
         }
