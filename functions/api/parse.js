@@ -54,7 +54,7 @@ Current Reference Time: ${yyyy}-${mm}-${dd} ${hh}:${min} (${currentWeekday}), Ti
 
 Extract the schedule event from the user's text and respond ONLY with a valid JSON object matching this schema:
 {
-  "title": "string (strictly concise core event noun phrase, e.g. 两个博士预答辩, 赵帅奇博士预答辩, 项目周会, 财务审计沟通会)",
+  "title": "string (strictly concise core event noun phrase, <= 12 characters, no punctuation, e.g. 赵帅奇博士预答辩, 两个博士预答辩, 项目周会, 财务审计沟通会)",
   "startTime": "string (ISO 8601 local date-time format YYYY-MM-DDTHH:mm:ss for the updated/new schedule)",
   "endTime": "string (ISO 8601 local date-time format YYYY-MM-DDTHH:mm:ss for the updated/new schedule)",
   "allDay": boolean,
@@ -71,40 +71,62 @@ Extract the schedule event from the user's text and respond ONLY with a valid JS
 }
 
 Rules:
-1. Title Rules:
-   - The title MUST be an extremely concise, clean noun or noun phrase (名词或名词短语，如 "两个博士预答辩", "预答辩", "项目周会", "团队周会", "2026年Q3需求评审").
-   - If key participant quantities are part of the core subject (e.g. "两个博士"), combine them into the noun phrase: "两个博士预答辩".
-   - STRICTLY strip all recipient names and vocatives at the beginning (e.g. "孙卓，", "张老师：", "@所有人", "各位同事好").
-   - STRICTLY strip first-person subject prefixes and intent verbs (e.g. "我有...", "我们计划...", "打算...", "我想约你...").
-   - STRICTLY strip conversational question tags, availability checks, or polite closing queries at the end (e.g. "你有时间吧？", "你有空吗？", "方便吗？", "你能参加吗？", "收到请回复").
-   - STRICTLY strip announcement/notice boilerplate phrasing (e.g. "...安排如下", "...日程如下", "...通知如下", "...的通知", "关于召开...", "请各位老师预留时间参加", etc.).
-   - STRICTLY strip modification/reschedule connectors and reasons from title (e.g. "由于有老师...有课", "因此...时间改为...", "改为", "调整为"). The title must only be the core event name (e.g. "预答辩").
-   - Do NOT include dates, times, locations, emojis (like [握手]), or polite closing words in the title.
-2. Location Rules:
-   - Extract the physical location or room (e.g. "科技楼302", "315会议室", "主楼报告厅").
-   - NEVER include verbs or event names in location (e.g. "在科技楼302预答辩" -> location: "科技楼302", NOT "科技楼302预答辩").
-   - If it is an online meeting (e.g. Tencent Meeting / Zoom) and no physical location is given, set "location" to "腾讯会议 123-456-789" or "Zoom 123-456-789" so calendar apps display the location field clearly.
-3. Relative dates (e.g. 今天, 明天, 后天, 下周五, 本周三, 3天后, tomorrow) must be calculated strictly relative to Current Reference Time (${yyyy}-${mm}-${dd}).
+1. Title Rules (标题规则):
+   - 长度严格限制在 12 个字以内（<= 12 characters）。
+   - 尽量使用名词或名词短语（如 "赵帅奇博士预答辩", "两个博士预答辩", "项目周会", "团队周会", "财务审计沟通会"）。
+   - 绝对不带任何标点符号（禁止包含逗号、句号、冒号、感叹号、顿号、问号、引号、括号等任何标点）。
+   - 彻底剔除开头的打招呼与问候语（如“各位老师下午好，”、“大家下午好，”、“各位领导好，”、“老师们好，”、“下午好，”、“@所有人”等，绝不能作为标题的一部分！）。
+   - 彻底剔除事务性与通知套话（如“...安排如下”、“...日程如下”、“...通知如下”、“...的通知”、“关于召开...”等）。例如输入“各位老师下午好，赵帅奇博士预答辩安排如下：”，标题必须提取为“赵帅奇博士预答辩”，绝对不要输出“各位老师下午好，赵帅奇博士预答辩”。
+   - 彻底剔除主观意图动词与句末疑问（如“我有...”、“我们计划...”、“打算...”、“你有时间吧？”、“方便吗？”、“收到请回复”、“谢谢[握手]”等）。若包含参与人数量，合入名词短语（如“我有两个博士计划预答辩” -> “两个博士预答辩”）。
+   - 彻底剔除改期原因与连词（如“由于有老师...有课”、“因此时间改为”），标题仅保留核心事件名词。
+   - 标题中不得包含日期、时间、地点或表情符号。
+
+2. Date Parsing & Cross-Verification Rules (日期解析与双重核对规则):
+   - 具体日期优先（Explicit Date Priority）：文本中如果出现具体明确的月日（如“9月24日”、“2026-09-24”、“9/24”、“10月5号”等），必须以该明确日期为绝对基准！年份根据 Current Reference Time (${yyyy}) 推算。
+   - 双重核对（Cross-Verification）：当文本中同时出现具体日期与星期/相对周表达时（例如“9月24日（下周四）”、“9月24日 周四”、“10月15日(本周四)”）：
+     * 必须双重核对具体日期与星期！
+     * 具体日期“9月24日”是明确且决定性的事件日期，“下周四”仅为自然语言中的星期补充标注，绝非再加 7 天！
+     * 绝不能只解析“下周四”而错误推算出“10月1日”！该日程日期必须严格解析为 9月24日（${yyyy}-09-24）。
+   - 仅相对日期时的计算：仅当文本中完全没有具体月日（仅有“下周四”、“明天下午”、“后天”等）时，才严格基于 Current Reference Time 进行相对计算（中文周一为一周起始，下周四指下个周一至周日周期内的周四）。
+
+3. Location Rules:
+   - 提取具体物理地点或会议室（如“管理楼A515会议室”、“科技楼302”、“315会议室”）。
+   - 地点中严禁包含动词或事件名称（如“在管理楼A515预答辩” -> location 应为“管理楼A515”，不能包含“预答辩”）。
+   - 若为线上会议（腾讯会议/Zoom）且无实体地点，填写“腾讯会议 123-456-789”或“Zoom 123-456-789”。
+
 4. Modification / Reschedule Rules:
-   - If the user's text expresses an intent to change, update, or reschedule an existing or previously scheduled event (e.g. contains "改为", "改到", "调整为", "推迟", "提前", "原定...改...", "由于...有课，预答辩时间改为..."):
-     * Set "isModification": true.
-     * Populate "targetCriteria":
-       - "titleKeywords": [core event name being modified, e.g. "预答辩"]
-       - "originalDate": ISO YYYY-MM-DD date of the original event before change (e.g. if original was "下周四下午", calculate that Thursday's YYYY-MM-DD).
-       - "originalTimeOfDay": "afternoon" if original was 下午, "morning" if 上午, "evening" if 晚上.
-     * If text indicates the location remains the same (e.g. "地点不变", "原地点", "地点同上", "原会议室"), set "keepExistingLocation": true.
-     * Compute "startTime" and "endTime" strictly for the NEW rescheduled time (e.g. "上午9:30" on that same day).
-   - If the text is a regular new event (not a modification/reschedule), set "isModification": false, "keepExistingLocation": false, and "targetCriteria": null.
-5. If end time is not explicitly specified:
-   - If duration is mentioned (e.g. 持续2小时, 30分钟), add duration to startTime.
-   - If no duration is mentioned and it's not allDay, default endTime to 1 hour after startTime.
-   - If allDay is true, startTime and endTime should have the same date with 00:00:00.
-6. Tencent meeting number like 123-456-789 should be converted to https://meeting.tencent.com/dm/123456789 in the "url" field.
-7. Few-Shot Examples:
-   - Input: "孙卓，我有两个博士计划下周二上午八点半预答辩，你有时间吧？" -> "title": "两个博士预答辩", "location": ""
-   - Input: "孙卓，我有两个博士计划下周二上午八点半在科技楼302预答辩，你有时间吧？" -> "title": "两个博士预答辩", "location": "科技楼302"
-   - Input: "张老师，我们打算明天下午3点在315会议室开项目周会，方便吗？" -> "title": "项目周会", "location": "315会议室"
-   - Input: "下周三上午10点腾讯会议：123-456-789 开团队周会 预计1.5小时" -> "title": "团队周会", "location": "腾讯会议 123-456-789", "url": "https://meeting.tencent.com/dm/123456789"
+   - 若文本表达对已有日程的修改、改期、推迟、提前（如“改为”、“改到”、“调整为”、“推迟”、“原定...改...”）：
+     * "isModification": true.
+     * "targetCriteria":
+       - "titleKeywords": [被修改的核心事件名，如 "赵帅奇博士预答辩", "预答辩"]
+       - "originalDate": 修改前的原日期（YYYY-MM-DD）
+       - "originalTimeOfDay": "afternoon" / "morning" / "evening"
+     * 若提示地点不变（如“地点不变”、“原地点”），"keepExistingLocation": true.
+     * "startTime" 与 "endTime" 严格计算为修改后的新时间。
+   - 若为常规新日程，"isModification": false, "keepExistingLocation": false, "targetCriteria": null.
+
+5. Time & Duration Rules:
+   - 格式为 ISO 8601 本地时间 YYYY-MM-DDTHH:mm:ss。
+   - 未指定结束时间时：若提到时长（如预计1.5小时），则加上时长；若未提时长且非全天，默认结束时间为开始时间后1小时；全天日程开始与结束日期相同且时间为 00:00:00。
+
+6. Meeting URL:
+   - 腾讯会议号（如 123-456-789）自动转换为 https://meeting.tencent.com/dm/123456789 填入 url 字段。
+
+7. Few-Shot Examples (少样本示例):
+   - Input: "各位老师下午好，赵帅奇博士预答辩安排如下：\n时间：9月24日（下周四）下午2:30\n地点：管理楼A515会议室\n请各位老师预留时间参加，谢谢[握手]"
+     -> "title": "赵帅奇博士预答辩", "startTime": "${yyyy}-09-24T14:30:00", "endTime": "${yyyy}-09-24T15:30:00", "location": "管理楼A515会议室", "url": "", "allDay": false
+     (解析要点：标题严格在12字以内且无标点；剔除“各位老师下午好”；双重核对9月24日与下周四，准确解析为09-24而非10-01)
+   - Input: "孙卓，我有两个博士计划下周二上午八点半预答辩，你有时间吧？"
+     -> "title": "两个博士预答辩", "location": ""
+   - Input: "孙卓，我有两个博士计划下周二上午八点半在科技楼302预答辩，你有时间吧？"
+     -> "title": "两个博士预答辩", "location": "科技楼302"
+   - Input: "张老师，我们打算明天下午3点在315会议室开项目周会，方便吗？"
+     -> "title": "项目周会", "location": "315会议室"
+   - Input: "下周三上午10点腾讯会议：123-456-789 开团队周会 预计1.5小时"
+     -> "title": "团队周会", "location": "腾讯会议 123-456-789", "url": "https://meeting.tencent.com/dm/123456789"
+   - Input: "各位老师好，由于有老师下周四下午有课，因此预答辩时间改为上午9：30，地点不变，辛苦各位老师"
+     -> "title": "预答辩", "isModification": true, "keepExistingLocation": true, "targetCriteria": { "titleKeywords": ["预答辩"], "originalTimeOfDay": "afternoon" }
+
 8. Output MUST be strictly valid JSON without any markdown code fence blocks or extra explanation.`;
 
     const messages = [
@@ -245,6 +267,76 @@ Rules:
         }),
         { status: 422, headers: corsHeaders }
       );
+    }
+
+    // Sanitize parsedJson to guarantee <= 12 chars title, no punctuation, greetings stripped, and date cross-checked
+    if (parsedJson && typeof parsedJson === 'object') {
+      if (parsedJson.title && typeof parsedJson.title === 'string') {
+        let t = parsedJson.title.trim();
+        // 1. Strip emojis
+        t = t.replace(/\[[\u4e00-\u9fa5a-zA-Z0-9_\-]+\]/g, '');
+        // 2. Strip greetings and salutations
+        t = t.replace(/^(?:(?:各位(?:老师|领导|同事|同学|朋友|专家|会员|同仁|代表|家长|评审|评委|学长|学姐|新生|教授)?|大家|老师们|领导们|同事们|同学们)?(?:下午好|上午好|早上好|中午好|晚上好|好|您好|你好)|亲爱的.+?[好！!，,\s]|(?:Good\s+(?:morning|afternoon|evening)|Hi|Hello|Dear)\s+[^,，!！]+[,，!！]?)+[\s,，:：\-]*/i, '');
+        // 3. Strip recipient vocatives
+        t = t.replace(/^(?:[A-Za-z\u4e00-\u9fa5]{2,5}|@\S+)[，,：:\s]+(?=(?:我|咱|请|有|下周|明天|后天|今天|关于|原定|现|麻烦|想|由于|因|各位))/i, '');
+        // 4. Strip announcement boilerplate prefixes/suffixes
+        t = t.replace(/^(?:关于(?:举办|召开|组织|开展)?|通知[：:]|紧急通知[：:]|会议通知[：:]|日程安排[：:]|日程[：:]|安排[：:])/g, '');
+        t = t.replace(/(?:的?(?:工作|日程|会议)?安排如下[：:]*|安排如下[：:]*|日程如下[：:]*|通知如下[：:]*|如下[：:]*|的通知|的安排)$/g, '');
+        // 5. Strip closing polite queries
+        t = t.replace(/请(?:各位|大家)?.+?(?:参加|出席|预留时间).*$/g, '');
+        t = t.replace(/(?:谢谢|致谢|收到请回复).*$/g, '');
+        // 5.5 Strip leading relative date/time words and action verbs
+        t = t.replace(/^(?:大后天|后天|明天|明日|今天|今日|昨天|昨日|下下周[一二三四五六日天]?|下周[一二三四五六日天]?|本周[一二三四五六日天]?|这周[一二三四五六日天]?|周[一二三四五六日天]|星期[一二三四五六日天])[\s,，]*/i, '');
+        t = t.replace(/^(?:早上|清晨|早晨|上午|中午|下午|傍晚|晚上|夜里|半夜|凌晨)[\s,，]*/i, '');
+        t = t.replace(/^(?:开|举行|举办|参加|召开)\s*(?=[A-Za-z0-9\u4e00-\u9fa5]{2,}(?:周会|例会|会议|答辩|预答辩|评审|研讨|讨论|汇报|宣讲|典礼|仪式|发布会))/i, '');
+        // 6. Strip all punctuation marks
+        t = t.replace(/[，,。;；:：!！?？"“”'‘’、~～\-—·\(\)（）\[\]【】]/g, '').trim();
+        // 7. Strictly limit to 12 characters
+        if (t.length > 12) {
+          t = t.substring(0, 12).trim();
+        }
+        parsedJson.title = t || '日程安排';
+      }
+
+      // Cross-check date with explicit date in text if present (e.g. 9月24日 vs 下周四 -> 10月1日)
+      if (parsedJson.startTime && typeof parsedJson.startTime === 'string') {
+        let expYear = null, expMonth = null, expDay = null;
+        const m1 = text.match(/(?:(\d{4})[\.\/\-年])?(\d{1,2})月(\d{1,2})[日号]?/);
+        if (m1) {
+          expYear = m1[1] ? parseInt(m1[1], 10) : now.getFullYear();
+          expMonth = parseInt(m1[2], 10);
+          expDay = parseInt(m1[3], 10);
+        } else {
+          const m2 = text.match(/(?:^|[^\d])(\d{4})[\.\/\-](\d{1,2})[\.\/\-](\d{1,2})(?!\d)/);
+          if (m2) {
+            expYear = parseInt(m2[1], 10);
+            expMonth = parseInt(m2[2], 10);
+            expDay = parseInt(m2[3], 10);
+          } else {
+            const m3 = text.match(/(?:^|[^\d:])(0?[1-9]|1[0-2])[\/\-](0?[1-9]|[12]\d|3[01])(?!\d|:)/);
+            if (m3) {
+              expYear = now.getFullYear();
+              expMonth = parseInt(m3[1], 10);
+              expDay = parseInt(m3[2], 10);
+            }
+          }
+        }
+
+        if (expMonth !== null && expDay !== null && expMonth >= 1 && expMonth <= 12 && expDay >= 1 && expDay <= 31) {
+          const expDateStr = `${expYear}-${pad(expMonth)}-${pad(expDay)}`;
+
+          const currentStartMatch = parsedJson.startTime.match(/^(\d{4}-\d{2}-\d{2})(T\d{2}:\d{2}:\d{2})/);
+          if (currentStartMatch && currentStartMatch[1] !== expDateStr) {
+            parsedJson.startTime = `${expDateStr}${currentStartMatch[2]}`;
+            if (parsedJson.endTime && typeof parsedJson.endTime === 'string') {
+              const currentEndMatch = parsedJson.endTime.match(/^(\d{4}-\d{2}-\d{2})(T\d{2}:\d{2}:\d{2})/);
+              if (currentEndMatch) {
+                parsedJson.endTime = `${expDateStr}${currentEndMatch[2]}`;
+              }
+            }
+          }
+        }
+      }
     }
 
     return new Response(
