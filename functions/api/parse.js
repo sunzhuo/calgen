@@ -54,7 +54,7 @@ Current Reference Time: ${yyyy}-${mm}-${dd} ${hh}:${min} (${currentWeekday}), Ti
 
 Extract the schedule event from the user's text and respond ONLY with a valid JSON object matching this schema:
 {
-  "title": "string (concise summary of the event, without date/time/location clutter)",
+  "title": "string (strictly concise core event subject, e.g. 赵帅奇博士预答辩, 项目周会, 财务审计沟通会)",
   "startTime": "string (ISO 8601 local date-time format YYYY-MM-DDTHH:mm:ss)",
   "endTime": "string (ISO 8601 local date-time format YYYY-MM-DDTHH:mm:ss)",
   "allDay": boolean,
@@ -64,13 +64,22 @@ Extract the schedule event from the user's text and respond ONLY with a valid JS
 }
 
 Rules:
-1. Relative dates (e.g. 今天, 明天, 后天, 下周五, 本周三, 3天后, tomorrow) must be calculated strictly relative to Current Reference Time (${yyyy}-${mm}-${dd}).
-2. If end time is not explicitly specified:
+1. Title Rules:
+   - The title MUST be extremely concise, clean, and directly identify the event/meeting subject (e.g. "赵帅奇博士预答辩", "团队周会", "2026年Q3需求评审").
+   - STRICTLY strip all conversational greetings and salutations (e.g. "各位老师下午好", "大家好", "各位同事好", "各位领导好", "Hi all", "Dear team").
+   - STRICTLY strip announcement/notice boilerplate phrasing (e.g. "...安排如下", "...日程如下", "...通知如下", "...的通知", "关于召开...", "请各位老师预留时间参加", etc.).
+   - Do NOT include dates, times, locations, emojis (like [握手]), or polite closing words in the title.
+   - Examples:
+     * "各位老师下午好，赵帅奇博士预答辩安排如下：时间：9月24日..." -> title: "赵帅奇博士预答辩"
+     * "关于召开2026年第三季度技术总结大会的通知，定于明天上午9:30..." -> title: "2026年第三季度技术总结大会"
+     * "大家好！周三下午2点在第一会议室开项目周会" -> title: "项目周会"
+2. Relative dates (e.g. 今天, 明天, 后天, 下周五, 本周三, 3天后, tomorrow) must be calculated strictly relative to Current Reference Time (${yyyy}-${mm}-${dd}).
+3. If end time is not explicitly specified:
    - If duration is mentioned (e.g. 持续2小时, 30分钟), add duration to startTime.
    - If no duration is mentioned and it's not allDay, default endTime to 1 hour after startTime.
    - If allDay is true, startTime and endTime should have the same date with 00:00:00.
-3. Tencent meeting number like 123-456-789 should be converted to https://meeting.tencent.com/dm/123456789 in the "url" field.
-4. Output MUST be strictly valid JSON without any markdown code fence blocks or extra explanation.`;
+4. Tencent meeting number like 123-456-789 should be converted to https://meeting.tencent.com/dm/123456789 in the "url" field.
+5. Output MUST be strictly valid JSON without any markdown code fence blocks or extra explanation.`;
 
     const messages = [
       { role: 'system', content: systemPrompt },

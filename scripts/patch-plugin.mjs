@@ -29,3 +29,51 @@ if (fs.existsSync(pluginGradlePath)) {
   console.log('Plugin build.gradle not found at', pluginGradlePath);
 }
 
+// Patch CreateEventWithPromptInput.kt to supply all location extra keys (eventLocation, location, event_location)
+const createPromptPath = path.resolve(__dirname, '../node_modules/@capgo/capacitor-calendar/android/src/main/kotlin/app/capgo/calendar/models/inputs/CreateEventWithPromptInput.kt');
+if (fs.existsSync(createPromptPath)) {
+  let content = fs.readFileSync(createPromptPath, 'utf8');
+  const targetPattern = /location\?\.let\s*\{\s*intent\.putExtra\(CalendarContract\.Events\.EVENT_LOCATION,\s*it\)\s*\}/;
+  const replacement = `location?.let {
+            if (it.isNotBlank()) {
+                val loc = it.trim()
+                intent.putExtra(CalendarContract.Events.EVENT_LOCATION, loc)
+                intent.putExtra("eventLocation", loc)
+                intent.putExtra("location", loc)
+                intent.putExtra("event_location", loc)
+                intent.putExtra("EXTRA_EVENT_LOCATION", loc)
+            }
+        }`;
+  if (targetPattern.test(content)) {
+    content = content.replace(targetPattern, replacement);
+    fs.writeFileSync(createPromptPath, content, 'utf8');
+    console.log('Successfully patched CreateEventWithPromptInput.kt with multi-key location extras');
+  } else if (content.includes('intent.putExtra("location", loc)')) {
+    console.log('CreateEventWithPromptInput.kt already contains multi-key location extras');
+  }
+}
+
+// Patch ModifyEventWithPromptInput.kt to supply all location extra keys
+const modifyPromptPath = path.resolve(__dirname, '../node_modules/@capgo/capacitor-calendar/android/src/main/kotlin/app/capgo/calendar/models/inputs/ModifyEventWithPromptInput.kt');
+if (fs.existsSync(modifyPromptPath)) {
+  let content = fs.readFileSync(modifyPromptPath, 'utf8');
+  const targetPattern = /input\.location\?\.let\s*\{\s*intent\.putExtra\(CalendarContract\.Events\.EVENT_LOCATION,\s*it\)\s*\}/;
+  const replacement = `input.location?.let {
+            if (it.isNotBlank()) {
+                val loc = it.trim()
+                intent.putExtra(CalendarContract.Events.EVENT_LOCATION, loc)
+                intent.putExtra("eventLocation", loc)
+                intent.putExtra("location", loc)
+                intent.putExtra("event_location", loc)
+                intent.putExtra("EXTRA_EVENT_LOCATION", loc)
+            }
+        }`;
+  if (targetPattern.test(content)) {
+    content = content.replace(targetPattern, replacement);
+    fs.writeFileSync(modifyPromptPath, content, 'utf8');
+    console.log('Successfully patched ModifyEventWithPromptInput.kt with multi-key location extras');
+  } else if (content.includes('intent.putExtra("location", loc)')) {
+    console.log('ModifyEventWithPromptInput.kt already contains multi-key location extras');
+  }
+}
+

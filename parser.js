@@ -60,6 +60,41 @@ function getWeekdayDate(baseDate, targetDay, weekOffset = 0, explicitThisWeek = 
 }
 
 /**
+ * Sanitize and clean event title to keep it concise, clear, and focused on the core subject.
+ * Strips salutations, polite greetings, boilerplate announcement prefixes/suffixes, and emojis.
+ * @param {string} rawTitle
+ * @returns {string}
+ */
+export function cleanEventTitle(rawTitle) {
+  if (!rawTitle || typeof rawTitle !== 'string') return '日程安排';
+  let t = rawTitle.trim();
+
+  // 1. Strip bracket emojis (e.g. [握手], [OK], [强], [玫瑰], [微笑])
+  t = t.replace(/\[[\u4e00-\u9fa5a-zA-Z0-9_\-]+\]/g, '');
+
+  // 2. Strip salutations and greetings from the start
+  // e.g., 各位老师下午好, 各位领导好, 老师们好, 大家好, 亲爱的同事们, Hi all, Good morning, etc.
+  t = t.replace(/^(?:各位(?:老师|领导|同事|同学|朋友|专家|会员|同仁|代表|家长|评审|评委)?(?:下午好|上午好|中午好|晚上好|好)?|[大各]家(?:下午好|上午好|中午好|晚上好|好)?|亲爱的.+?[好！!，,\s]|(?:Good\s+(?:morning|afternoon|evening)|Hi|Hello|Dear)\s+[^,，!！]+[,，!！]?)+[\s,，:：\-]*/i, '');
+
+  // 3. Strip notification / announcement prefixes
+  // e.g., 关于召开..., 关于举办..., 会议通知:, 通知:, 日程安排:
+  t = t.replace(/^(?:关于(?:举办|召开|组织|开展)?|通知[：:]|紧急通知[：:]|会议通知[：:]|日程安排[：:]|日程[：:])/g, '');
+
+  // 4. Strip announcement boilerplate suffixes: ...安排如下, ...日程如下, ...通知如下, 如下, 的通知, 的安排
+  // Note: Carefully keep the core subject intact (e.g. 预答辩, 答辩, 总结会)
+  t = t.replace(/(?:的?(?:工作|日程|会议)?安排如下[：:]*|安排如下[：:]*|日程如下[：:]*|通知如下[：:]*|如下[：:]*|的通知|的安排)$/g, '');
+
+  // 5. Strip polite calls to action: 请各位老师预留时间参加, 请准时出席, 谢谢
+  t = t.replace(/请(?:各位|大家)?.+?(?:参加|出席|预留时间).*$/g, '');
+  t = t.replace(/(?:谢谢|致谢|收到请回复).*$/g, '');
+
+  // 6. Clean leading/trailing punctuation and whitespace
+  t = t.replace(/^[\s,，.。;；:：!！\-—~～\(\)（）]+|[\s,，.。;；:：!！\-—~～\(\)（）]+$/g, '').trim();
+
+  return t || '日程安排';
+}
+
+/**
  * Main parser function
  * @param {string} text - User input schedule text
  * @param {Date} [referenceDate] - Base date for relative calculations
@@ -379,7 +414,7 @@ export function parseScheduleText(text, referenceDate = new Date()) {
   }
 
   // 3. TITLE EXTRACTION
-  let title = explicitTitle;
+  let title = explicitTitle ? cleanEventTitle(explicitTitle) : '';
   if (!title) {
     let cleaned = trimmed;
 
@@ -423,12 +458,16 @@ export function parseScheduleText(text, referenceDate = new Date()) {
     // Clean leading/trailing punctuation and whitespace
     cleaned = cleaned.replace(/^[\s,，.。;；:：!！\-—~～]+/g, '').replace(/[\s,，.。;；:：!！\-—~～]+$/g, '');
 
-    const candidateLines = cleaned.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+    const candidateLines = cleaned.split(/\r?\n/)
+      .map(s => cleanEventTitle(s))
+      .filter(s => s && s !== '日程安排');
     title = candidateLines.length > 0 ? candidateLines[0] : '';
     if (!title || title.length < 2) {
       title = '日程安排';
     }
   }
+
+  title = cleanEventTitle(title);
 
   if (title.length > 60) {
     title = title.substring(0, 60).trim() + '...';
@@ -535,7 +574,7 @@ export async function parseScheduleWithGemma(text, options = {}) {
 
   return {
     id: `event-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`,
-    title: d.title || '日程安排',
+    title: cleanEventTitle(d.title || '日程安排'),
     startTime: startDate.toISOString(),
     endTime: endDate.toISOString(),
     allDay: !!d.allDay,

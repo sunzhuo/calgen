@@ -240,17 +240,25 @@ export async function openCalendarEvent(event) {
           endMs = startMs + (event.allDay ? 86400000 : 3600000);
         }
 
+        const descParts = [];
+        if (event.location && !(event.description || '').includes(event.location)) {
+          descParts.push(`地点: ${event.location.trim()}`);
+        }
+        if (event.description) {
+          descParts.push(event.description);
+        }
+        if (event.url) {
+          descParts.push(`链接: ${event.url}`);
+        }
+
         // Launch native system calendar event creation UI with prefilled fields
         await calendarPlugin.createEventWithPrompt({
           title: event.title || '日程安排',
           startDate: startMs,
           endDate: endMs,
           isAllDay: Boolean(event.allDay),
-          location: event.location || '',
-          description: [
-            event.description || '',
-            event.url ? `链接: ${event.url}` : ''
-          ].filter(Boolean).join('\n')
+          location: event.location ? String(event.location).trim() : '',
+          description: descParts.join('\n')
         });
         return { success: true, method: 'capacitor' };
       } catch (err) {

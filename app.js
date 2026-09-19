@@ -1,5 +1,5 @@
 import { parseScheduleText, parseScheduleTextAsync, parseScheduleWithGemma, isEventOutdated } from './parser.js';
-import { buildICS, downloadICS, openCalendarEvent, isNativeApp } from './ics.js';
+import { buildICS, downloadICS, openCalendarEvent, isNativeApp, getSafeICSFilename } from './ics.js';
 
 const STORAGE_KEY = 'calgen_schedules_v1';
 const AUTO_DOWNLOAD_KEY = 'calgen_auto_download';
@@ -288,6 +288,16 @@ function renderSchedulesList() {
           </svg>
           ${isNativeApp() ? '加入日历' : '下载 .ics'}
         </button>
+        ${isNativeApp() ? `
+          <button type="button" class="btn btn-secondary btn-sm export-ics-btn" data-id="${item.id}" title="导出为标准 .ics 文件">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+              <polyline points="7 10 12 15 17 10"></polyline>
+              <line x1="12" y1="15" x2="12" y2="3"></line>
+            </svg>
+            导出 .ics
+          </button>
+        ` : ''}
         <button type="button" class="btn btn-danger-outline btn-sm delete-btn" data-id="${item.id}" title="删除日程">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <polyline points="3 6 5 6 21 6"></polyline>
@@ -666,6 +676,19 @@ function setupListeners() {
         openCalendarEvent(item).then(() => {
           showToast(isNativeApp() ? `已唤起系统日历: ${item.title}` : `已下载 .ics 文件: ${item.title}`, 'success');
         });
+      }
+      return;
+    }
+
+    const exportIcsBtn = e.target.closest('.export-ics-btn');
+    if (exportIcsBtn) {
+      const id = exportIcsBtn.getAttribute('data-id');
+      const item = schedules.find(s => s.id === id);
+      if (item) {
+        const icsData = buildICS(item);
+        const filename = getSafeICSFilename(item.title);
+        downloadICS(icsData, filename);
+        showToast(`已导出 .ics 文件: ${filename}`, 'success');
       }
       return;
     }
