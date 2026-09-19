@@ -347,6 +347,48 @@ body {
   gap: 6px;
 }
 
+/* Modification / Reschedule Banner in Preview */
+.preview-mod-banner {
+  background: var(--warning-light);
+  border: 1px solid rgba(245, 158, 11, 0.4);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  margin-top: 10px;
+  font-size: 0.85rem;
+  color: var(--text-primary);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.preview-mod-banner.info {
+  background: var(--primary-light);
+  border-color: var(--primary-border);
+}
+
+.preview-mod-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+  color: #b45309;
+}
+
+.preview-mod-banner.info .preview-mod-title {
+  color: var(--primary);
+}
+
+.preview-mod-body {
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+.preview-mod-body .highlight {
+  font-weight: 600;
+  color: var(--primary);
+}
+
 /* Action Buttons */
 .input-actions {
   display: flex;
@@ -519,6 +561,12 @@ body {
 .time-tag.future {
   background: var(--bg-hover);
   color: var(--text-secondary);
+}
+
+.time-tag.modified {
+  background: var(--warning-light);
+  color: #b45309;
+  border: 1px solid rgba(245, 158, 11, 0.35);
 }
 
 .schedule-details {

@@ -1,4 +1,4 @@
-import { parseScheduleText, parseScheduleTextAsync, parseScheduleWithGemma, isEventOutdated } from './parser.js';
+import { parseScheduleText, parseScheduleTextAsync, parseScheduleWithGemma, isEventOutdated, findMatchingSchedule } from './parser.js';
 import { buildICS, downloadICS, openCalendarEvent, isNativeApp, getSafeICSFilename } from './ics.js';
 
 const STORAGE_KEY = 'calgen_schedules_v1';
@@ -230,6 +230,7 @@ function renderSchedulesList() {
         <div class="card-title-group">
           <div class="card-title">
             <span class="time-tag ${relTag.className}">${relTag.text}</span>
+            ${item.isModified ? '<span class="time-tag modified">已更新</span>' : ''}
             <span>${escapeHtml(item.title)}</span>
             <span class="engine-badge ${isAi ? 'ai' : 'local'}" style="font-size: 0.7rem; padding: 1px 6px;">
               ${isAi ? '🤖 Gemma 4' : '⚡ 本地'}
@@ -331,6 +332,54 @@ function displayInPreview(event, isAi = false, isPending = false) {
 
   previewTitle.textContent = event.title;
   previewTime.textContent = formatDisplayDateTime(event.startTime, event.endTime, event.allDay);
+
+  const previewModBanner = document.getElementById('previewModBanner');
+  if (previewModBanner) {
+    if (event.isModification && event.targetCriteria) {
+      const matched = findMatchingSchedule(event.targetCriteria, schedules);
+      if (matched) {
+        previewModBanner.className = 'preview-mod-banner';
+        const locDisplay = (event.keepExistingLocation || !event.location)
+          ? `保持原地点 (${escapeHtml(matched.location || '未设地点')})`
+          : escapeHtml(event.location);
+
+        previewModBanner.innerHTML = `
+          <div class="preview-mod-title">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polyline points="1 4 1 10 7 10"></polyline>
+              <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path>
+            </svg>
+            检测到修改计划意图：将更新已有日程
+          </div>
+          <div class="preview-mod-body">
+            目标日程：<strong>${escapeHtml(matched.title)}</strong><br>
+            原时间：${formatDisplayDateTime(matched.startTime, matched.endTime, matched.allDay)}<br>
+            新时间：<span class="highlight">${formatDisplayDateTime(event.startTime, event.endTime, event.allDay)}</span>
+            <br>地点：${locDisplay}
+          </div>
+        `;
+        previewModBanner.style.display = 'flex';
+      } else {
+        previewModBanner.className = 'preview-mod-banner info';
+        previewModBanner.innerHTML = `
+          <div class="preview-mod-title">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="10"></circle>
+              <line x1="12" y1="16" x2="12" y2="12"></line>
+              <line x1="12" y1="8" x2="12.01" y2="8"></line>
+            </svg>
+            检测到修改计划意图
+          </div>
+          <div class="preview-mod-body">
+            当前列表中未找到原计划，生成时将作为新日程添加。
+          </div>
+        `;
+        previewModBanner.style.display = 'flex';
+      }
+    } else {
+      previewModBanner.style.display = 'none';
+    }
+  }
 
   if (event.location) {
     previewLoc.textContent = event.location;
@@ -484,15 +533,56 @@ async function processAndGenerate(text, triggerDownload = true, force = false) {
     return null;
   }
 
-  // Check if identical event already exists to avoid redundant duplicates
-  const existingIdx = schedules.findIndex(s =>
-    s.title === event.title && s.startTime === event.startTime && s.endTime === event.endTime
-  );
+  let isUpdatedExisting = false;
+  let updatedScheduleTitle = '';
 
-  if (existingIdx !== -1) {
-    schedules[existingIdx] = event;
-  } else {
-    schedules.unshift(event);
+  if (event.isModification && event.targetCriteria) {
+    const matched = findMatchingSchedule(event.targetCriteria, schedules);
+    if (matched) {
+      const idx = schedules.findIndex(s => s.id === matched.id);
+      if (idx !== -1) {
+        const finalLocation = (event.keepExistingLocation || !event.location)
+          ? (matched.location || event.location || '')
+          : event.location;
+
+        const finalUrl = event.url || matched.url || '';
+        const finalTitle = (matched.title && matched.title.includes(event.title))
+          ? matched.title
+          : (event.title || matched.title);
+
+        const updatedEvent = {
+          ...matched,
+          title: finalTitle,
+          startTime: event.startTime,
+          endTime: event.endTime,
+          allDay: event.allDay,
+          location: finalLocation,
+          url: finalUrl,
+          description: `${event.description}\n[已于 ${new Date().toLocaleTimeString()} 调整时间]`,
+          isModified: true,
+          updatedAt: new Date().toISOString(),
+          parserType: event.parserType
+        };
+
+        schedules[idx] = updatedEvent;
+        event = updatedEvent;
+        isUpdatedExisting = true;
+        updatedScheduleTitle = finalTitle;
+      }
+    }
+  }
+
+  if (!isUpdatedExisting) {
+    // Check if identical event already exists to avoid redundant duplicates
+    const existingIdx = schedules.findIndex(s =>
+      s.title === event.title && s.startTime === event.startTime && s.endTime === event.endTime
+    );
+
+    if (existingIdx !== -1) {
+      schedules[existingIdx] = event;
+    } else {
+      schedules.unshift(event);
+    }
   }
 
   saveSchedules();
@@ -502,8 +592,17 @@ async function processAndGenerate(text, triggerDownload = true, force = false) {
   if (triggerDownload) {
     await openCalendarEvent(event);
     const engineName = event.parserType === 'gemma-4-26b-a4b-it' ? ' (Gemma 4 AI)' : '';
-    const successMsg = isNativeApp() ? `已唤起系统日历: ${event.title}${engineName}` : `已下载 .ics 文件: ${event.title}${engineName}`;
-    showToast(successMsg, 'success');
+    if (isUpdatedExisting) {
+      const successMsg = isNativeApp()
+        ? `已更新系统日历: ${updatedScheduleTitle}${engineName}`
+        : `已更新已有日程并下载 .ics: ${updatedScheduleTitle}${engineName}`;
+      showToast(successMsg, 'success');
+    } else {
+      const successMsg = isNativeApp()
+        ? `已唤起系统日历: ${event.title}${engineName}`
+        : `已下载 .ics 文件: ${event.title}${engineName}`;
+      showToast(successMsg, 'success');
+    }
   }
 
   return event;

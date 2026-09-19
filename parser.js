@@ -95,181 +95,127 @@ export function cleanEventTitle(rawTitle) {
 }
 
 /**
- * Main parser function
- * @param {string} text - User input schedule text
- * @param {Date} [referenceDate] - Base date for relative calculations
- * @returns {Object|null} Parsed event object
+ * /**
+ * Parse date from natural language text
+ * @param {string} str
+ * @param {Date} [now]
+ * @returns {{ date: Date, text: string } | null}
  */
-export function parseScheduleText(text, referenceDate = new Date()) {
-  if (!text || typeof text !== 'string') return null;
-  const trimmed = text.trim();
-  if (!trimmed) return null;
+export function parseDateFromText(str, now = new Date()) {
+  if (!str) return null;
+  const trimmed = str.trim();
 
-  const now = new Date(referenceDate);
-  let matchedDate = null;
-  let allDay = false;
-  let startHours = null;
-  let startMinutes = null;
-  let endHours = null;
-  let endMinutes = null;
-  let durationMinutes = null;
-  let location = '';
-  let url = '';
-  let explicitTitle = '';
-
-  // Extract explicit URL (meeting link or website)
-  const urlMatch = trimmed.match(/(https?:\/\/[^\s]+)/i);
-  if (urlMatch) {
-    url = urlMatch[1];
-  }
-
-  // Extract Tencent Meeting / Zoom meeting numbers
-  const tencentMatch = trimmed.match(/腾讯会议[：:\s]*(\d{3}[-\s]?\d{3}[-\s]?\d{3,4})/i);
-  if (tencentMatch) {
-    const meetingCode = tencentMatch[1].replace(/[-\s]/g, '');
-    const meetingUrl = `https://meeting.tencent.com/dm/${meetingCode}`;
-    if (!url) url = meetingUrl;
-  }
-  const zoomMatch = trimmed.match(/Zoom[：:\s]*(\d{3}[-\s]?\d{3}[-\s]?\d{3,4})/i);
-  if (zoomMatch) {
-    const meetingCode = zoomMatch[1].replace(/[-\s]/g, '');
-    if (!url) url = `zoommtg://zoom.us/join?confno=${meetingCode}`;
-  }
-
-  // Check explicit title / location lines or fields
-  const explicitTitleMatch = trimmed.match(/(?:主题|日程|事项|事件|标题|会议名称)[：:\s]+([^\n,，;；]+)/i);
-  if (explicitTitleMatch) {
-    explicitTitle = explicitTitleMatch[1].trim();
-  }
-
-  const explicitLocMatch = trimmed.match(/(?:地点|位置|地址|会议室|场所)[：:\s]+([^\n,，;；]+)/i);
-  if (explicitLocMatch) {
-    location = explicitLocMatch[1].trim();
-  }
-
-  // If no explicit location, find inline location patterns
-  if (!location) {
-    // English: match "at [Location]" that is not a time
-    const enAtMatches = [...trimmed.matchAll(/\bat\s+([a-zA-Z0-9][a-zA-Z0-9\s]{1,25}?)(?=\s+with|\s+on|\s+for|\s+at|$|[,\.])/gi)];
-    for (const m of enAtMatches) {
-      const candidate = m[1].trim();
-      if (!/^(?:the|a|an|\d+(?::\d+)?\s*(?:am|pm)?)$/i.test(candidate)) {
-        location = candidate;
-        break;
-      }
-    }
-  }
-
-  if (!location) {
-    // Chinese: "在 [会议室|万达广场|...] (开会|举行|聚餐|...)" or "在 [地点]"
-    const inlineLocMatch = trimmed.match(/在\s*([a-zA-Z0-9\u4e00-\u9fa5\-_—\(\)（）#]{2,20}?)(?=\s*(?:开会|举行|集合|碰头|见面|聚餐|举办|进行|线上|等|[，,。！!\n]|$))/i);
-    if (inlineLocMatch) {
-      const candidate = inlineLocMatch[1].trim();
-      // Ensure candidate doesn't look like a time or relative date
-      if (!/^(今天|明天|后天|昨天|周|星期|上午|下午|晚上|\d+)/.test(candidate)) {
-        location = candidate;
-      }
-    }
-  }
-
-  // 1. DATE PARSING
-  // Check relative dates: 今天, 明天, 后天, 大后天, 昨天, 今日, 明日, 昨日
+  // 1. Check relative dates: 今天, 明天, 后天, 大后天, 昨天, 今日, 明日, 昨日
   const relDateMatch = trimmed.match(/(大后天|后天|明天|明日|今天|今日|昨天|昨日)/);
   if (relDateMatch) {
-    matchedDate = new Date(now);
+    const matchedDate = new Date(now);
     const word = relDateMatch[1];
     if (word === '大后天') matchedDate.setDate(matchedDate.getDate() + 3);
     else if (word === '后天') matchedDate.setDate(matchedDate.getDate() + 2);
     else if (word === '明天' || word === '明日') matchedDate.setDate(matchedDate.getDate() + 1);
     else if (word === '昨天' || word === '昨日') matchedDate.setDate(matchedDate.getDate() - 1);
-    // 今天: offset 0
+    return { date: matchedDate, text: word };
   }
 
-  // Check English relative dates: tomorrow, today, yesterday, day after tomorrow
-  if (!matchedDate) {
-    const enRelMatch = trimmed.match(/\b(day after tomorrow|tomorrow|today|yesterday)\b/i);
-    if (enRelMatch) {
-      matchedDate = new Date(now);
-      const word = enRelMatch[1].toLowerCase();
-      if (word === 'tomorrow') matchedDate.setDate(matchedDate.getDate() + 1);
-      else if (word === 'day after tomorrow') matchedDate.setDate(matchedDate.getDate() + 2);
-      else if (word === 'yesterday') matchedDate.setDate(matchedDate.getDate() - 1);
+  // 2. Check English relative dates: tomorrow, today, yesterday, day after tomorrow
+  const enRelMatch = trimmed.match(/\b(day after tomorrow|tomorrow|today|yesterday)\b/i);
+  if (enRelMatch) {
+    const matchedDate = new Date(now);
+    const word = enRelMatch[1].toLowerCase();
+    if (word === 'tomorrow') matchedDate.setDate(matchedDate.getDate() + 1);
+    else if (word === 'day after tomorrow') matchedDate.setDate(matchedDate.getDate() + 2);
+    else if (word === 'yesterday') matchedDate.setDate(matchedDate.getDate() - 1);
+    return { date: matchedDate, text: enRelMatch[1] };
+  }
+
+  // 3. Check weekday in Chinese
+  const weekRegex = /(?:(下下周|下下个星期|下下星期|下周末|下周|下个星期|下星期|下礼拜|这周末|本周末|本周|这周|这个星期|这礼拜)\s*([一二三四五六日天末12345670])?|(?:周|星期|礼拜)\s*([一二三四五六日天末12345670]))/i;
+  const weekMatch = trimmed.match(weekRegex);
+  if (weekMatch) {
+    const prefix = weekMatch[1] || '';
+    let dayChar = weekMatch[2] || weekMatch[3];
+    let weekOffset = 0;
+    let explicitThisWeek = false;
+
+    if (prefix.includes('下下')) {
+      weekOffset = 2;
+    } else if (prefix.includes('下')) {
+      weekOffset = 1;
+    } else if (prefix.includes('本') || prefix.includes('这')) {
+      explicitThisWeek = true;
+    }
+
+    if (prefix.includes('周末')) {
+      dayChar = '六';
+    }
+
+    if (dayChar) {
+      const targetDay = WEEKDAY_MAP[dayChar] !== undefined ? WEEKDAY_MAP[dayChar] : 1;
+      return {
+        date: getWeekdayDate(now, targetDay, weekOffset, explicitThisWeek),
+        text: weekMatch[0]
+      };
     }
   }
 
-  // Check weekday in Chinese:
-  // (下下周|下周|下个星期|下星期|下礼拜|本周|这周|这个星期|这礼拜|周|星期|礼拜) + [一二三四五六日天末12345670]
-  if (!matchedDate) {
-    const weekRegex = /(?:(下下周|下下个星期|下下星期|下周末|下周|下个星期|下星期|下礼拜|这周末|本周末|本周|这周|这个星期|这礼拜)\s*([一二三四五六日天末12345670])?|(?:周|星期|礼拜)\s*([一二三四五六日天末12345670]))/i;
-    const weekMatch = trimmed.match(weekRegex);
+  // 4. Check absolute date: YYYY年MM月DD日, YYYY-MM-DD, YYYY/MM/DD, YYYY.MM.DD
+  const ymdMatch = trimmed.match(/(\d{4})[\.\/\-年](\d{1,2})[\.\/\-月](\d{1,2})[日号]?/);
+  if (ymdMatch) {
+    const year = parseInt(ymdMatch[1], 10);
+    const month = parseInt(ymdMatch[2], 10) - 1;
+    const day = parseInt(ymdMatch[3], 10);
+    return {
+      date: new Date(year, month, day),
+      text: ymdMatch[0]
+    };
+  }
 
-    if (weekMatch) {
-      const prefix = weekMatch[1] || '';
-      let dayChar = weekMatch[2] || weekMatch[3];
-      let weekOffset = 0;
-      let explicitThisWeek = false;
-
-      if (prefix.includes('下下')) {
-        weekOffset = 2;
-      } else if (prefix.includes('下')) {
-        weekOffset = 1;
-      } else if (prefix.includes('本') || prefix.includes('这')) {
-        explicitThisWeek = true;
-      }
-
-      if (prefix.includes('周末')) {
-        dayChar = '六';
-      }
-
-      if (dayChar) {
-        const targetDay = WEEKDAY_MAP[dayChar] !== undefined ? WEEKDAY_MAP[dayChar] : 1;
-        matchedDate = getWeekdayDate(now, targetDay, weekOffset, explicitThisWeek);
-      }
+  // 5. Check MM月DD日 / MM-DD / MM/DD
+  const mdMatch = trimmed.match(/(\d{1,2})月(\d{1,2})[日号]?/) ||
+    trimmed.match(/(?:^|[^\d])(\d{1,2})[\/\-](\d{1,2})(?!\d)/);
+  if (mdMatch) {
+    const month = parseInt(mdMatch[1], 10) - 1;
+    const day = parseInt(mdMatch[2], 10);
+    let year = now.getFullYear();
+    if (month < now.getMonth() - 2) {
+      year += 1;
     }
+    return {
+      date: new Date(year, month, day),
+      text: mdMatch[0]
+    };
   }
 
-  // Check absolute date: YYYY年MM月DD日, YYYY-MM-DD, YYYY/MM/DD, YYYY.MM.DD
-  if (!matchedDate) {
-    const ymdMatch = trimmed.match(/(\d{4})[\.\/\-年](\d{1,2})[\.\/\-月](\d{1,2})[日号]?/);
-    if (ymdMatch) {
-      const year = parseInt(ymdMatch[1], 10);
-      const month = parseInt(ymdMatch[2], 10) - 1;
-      const day = parseInt(ymdMatch[3], 10);
-      matchedDate = new Date(year, month, day);
-    }
+  // 6. Check relative days: "X天后", "X天以后"
+  const daysLaterMatch = trimmed.match(/(\d+|[一二两三四五六七八九十]+)天[之以]?后/);
+  if (daysLaterMatch) {
+    const d = parseChineseNumber(daysLaterMatch[1]) || parseInt(daysLaterMatch[1], 10) || 1;
+    const matchedDate = new Date(now);
+    matchedDate.setDate(matchedDate.getDate() + d);
+    return {
+      date: matchedDate,
+      text: daysLaterMatch[0]
+    };
   }
 
-  // Check MM月DD日 / MM-DD / MM/DD
-  if (!matchedDate) {
-    const mdMatch = trimmed.match(/(\d{1,2})月(\d{1,2})[日号]?/) ||
-      trimmed.match(/(?:^|[^\d])(\d{1,2})[\/\-](\d{1,2})(?!\d)/);
-    if (mdMatch) {
-      const month = parseInt(mdMatch[1], 10) - 1;
-      const day = parseInt(mdMatch[2], 10);
-      let year = now.getFullYear();
-      if (month < now.getMonth() - 2) {
-        year += 1;
-      }
-      matchedDate = new Date(year, month, day);
-    }
-  }
+  return null;
+}
 
-  // Check relative days: "X天后", "X天以后"
-  if (!matchedDate) {
-    const daysLaterMatch = trimmed.match(/(\d+|[一二两三四五六七八九十]+)天[之以]?后/);
-    if (daysLaterMatch) {
-      const d = parseChineseNumber(daysLaterMatch[1]) || parseInt(daysLaterMatch[1], 10) || 1;
-      matchedDate = new Date(now);
-      matchedDate.setDate(matchedDate.getDate() + d);
-    }
-  }
+/**
+ * Parse time information from text
+ * @param {string} str
+ * @param {Date} targetDate
+ * @returns {{ startDate: Date, endDate: Date, allDay: boolean, startHours: number, startMinutes: number }}
+ */
+export function parseTimeFromText(str, targetDate) {
+  const trimmed = str.trim();
+  let startHours = null;
+  let startMinutes = null;
+  let endHours = null;
+  let endMinutes = null;
+  let durationMinutes = null;
+  let allDay = false;
 
-  // Default to today if no date found
-  if (!matchedDate) {
-    matchedDate = new Date(now);
-  }
-
-  // 2. TIME PARSING
   // Check for duration: 持续2小时, 开会半小时, 45分钟, 1.5小时
   const durMatch = trimmed.match(/(?:持续|时长|大概|预计)?(\d+(?:\.\d+)?|[一二两三四五半]+)\s*(?:个)?(小时|分钟|hr|hrs|min|mins)/i);
   if (durMatch) {
@@ -289,7 +235,7 @@ export function parseScheduleText(text, referenceDate = new Date()) {
     }
   }
 
-  // Check period modifier: 早上/上午/中午/下午/晚上/夜里/凌晨/pm/am
+  // Check period modifier: 早上/上午/中午/下午/晚上/夜里/半夜/凌晨/pm/am
   let isPM = false;
   let isAM = false;
   if (/下午|傍晚|晚上|夜里|半夜|\bpm\b/i.test(trimmed)) {
@@ -395,12 +341,12 @@ export function parseScheduleText(text, referenceDate = new Date()) {
     if (startMinutes === null) startMinutes = 0;
   }
 
-  const startDate = new Date(matchedDate);
+  const startDate = new Date(targetDate);
   startDate.setHours(startHours, startMinutes, 0, 0);
 
   let endDate;
   if (endHours !== null && endMinutes !== null) {
-    endDate = new Date(matchedDate);
+    endDate = new Date(targetDate);
     endDate.setHours(endHours, endMinutes, 0, 0);
     if (endDate.getTime() <= startDate.getTime()) {
       endDate.setDate(endDate.getDate() + 1);
@@ -413,37 +359,309 @@ export function parseScheduleText(text, referenceDate = new Date()) {
     endDate = new Date(startDate.getTime() + 60 * 60 * 1000);
   }
 
-  // 3. TITLE EXTRACTION
+  return {
+    startDate,
+    endDate,
+    allDay,
+    startHours,
+    startMinutes
+  };
+}
+
+/**
+ * Detect modification/reschedule intent in schedule text
+ * @param {string} text
+ * @param {Date} [referenceDate]
+ * @returns {Object|null}
+ */
+export function detectModificationIntent(text, referenceDate = new Date()) {
+  if (!text || typeof text !== 'string') return null;
+  const trimmed = text.trim();
+
+  const MODIFY_KEYWORD_REGEX = /(?:改为|改到|改在|改期为?|调整为|推迟[到至]|提前[到至]|时间变更为?|变更为?|更正为?|reschedule(?:d)?\s+to|moved\s+to)/i;
+  const match = trimmed.match(MODIFY_KEYWORD_REGEX);
+  if (!match) return null;
+
+  const beforeRaw = trimmed.slice(0, match.index).trim();
+  const afterRaw = trimmed.slice(match.index + match[0].length).trim();
+
+  const keepExistingLocation = /(?:地点不变|地点同上|原地点|保持原地点|原会议室|同原地点|原位置|location unchanged)/i.test(trimmed);
+  const keepExistingUrl = /(?:会议号不变|链接不变|线上地址不变|原链接)/i.test(trimmed);
+
+  // Extract original date from beforeRaw
+  const origDateRes = parseDateFromText(beforeRaw, referenceDate);
+  const originalDateObj = origDateRes ? origDateRes.date : null;
+  const originalDateText = origDateRes ? origDateRes.text : '';
+
+  // Extract original time of day from beforeRaw
+  let originalTimeOfDay = '';
+  if (/下午|傍晚|晚上|夜里|半夜|\bpm\b/i.test(beforeRaw)) {
+    originalTimeOfDay = 'afternoon';
+  } else if (/早上|清晨|早晨|上午|凌晨|\bam\b/i.test(beforeRaw)) {
+    originalTimeOfDay = 'morning';
+  } else if (/中午/.test(beforeRaw)) {
+    originalTimeOfDay = 'noon';
+  }
+
+  // Extract subject / title keywords from beforeRaw
+  let subject = beforeRaw;
+  subject = subject.replace(/^(?:各位(?:老师|领导|同事|同学|朋友|专家|会员|同仁|代表|家长|评审|评委)?(?:下午好|上午好|中午好|晚上好|好)?|[大各]家(?:下午好|上午好|中午好|晚上好|好)?|亲爱的.+?[好！!，,\s]|(?:Good\s+(?:morning|afternoon|evening)|Hi|Hello|Dear)\s+[^,，!！]+[,，!！]?)+[\s,，:：\-]*/i, '');
+  subject = subject.replace(/^(?:由于|因为)[\s\S]+?(?:(?:因此|所以|故|现)[\s,，]*|[，,]\s*(?:因此|所以|故|现)?[\s,，]*)/, '');
+  subject = subject.replace(/^(?:因此|所以|故|现)[\s,，]*/, '');
+  subject = subject.replace(/(?:原定|原计划|原本)/g, '');
+  subject = subject.replace(/(?:(?:下下周|下下个星期|下下星期|下周末|下周|下个星期|下星期|下礼拜|这周末|本周末|本周|这周|这个星期|这礼拜)\s*[一二三四五六日天末12345670]?|(?:周|星期|礼拜)[一二三四五六日天末12345670])/gi, '');
+  subject = subject.replace(/(?:大后天|后天|明天|明日|今天|今日|昨天|昨日)/g, '');
+  subject = subject.replace(/\b(day after tomorrow|tomorrow|today|yesterday)\b/gi, '');
+  subject = subject.replace(/\d{4}[\.\/\-年]\d{1,2}[\.\/\-月]\d{1,2}[日号]?/g, '');
+  subject = subject.replace(/\d{1,2}月\d{1,2}[日号]?/g, '');
+  subject = subject.replace(/(?:早上|清晨|早晨|上午|中午|下午|傍晚|晚上|夜里|半夜|凌晨)/g, '');
+  subject = subject.replace(/(\d{1,2})[:：](\d{2})/g, '');
+  subject = subject.replace(/(?:\d{1,2}|[一二两三四五六七八九十]+)\s*点(?:(?:\d{1,2}|半|一刻|三刻)分?)?/g, '');
+  subject = subject.replace(/(?:时间|日程|安排|会议)$/, '');
+  subject = subject.replace(/^[的\s,，.。;；:：!！\-—~～\(\)（）]+|[的\s,，.。;；:：!！\-—~～\(\)（）]+$/g, '').trim();
+
+  if (!subject || subject === '日程安排') {
+    const explicitTitleMatch = trimmed.match(/(?:主题|日程|事项|事件|标题|会议名称)[：:\s]+([^\n,，;；]+)/i);
+    if (explicitTitleMatch) {
+      subject = explicitTitleMatch[1].trim();
+    }
+  }
+
+  const cleanSubject = cleanEventTitle(subject || '日程安排');
+
+  // Determine new event date: check afterRaw first, if none, inherit original date
+  const afterDateRes = parseDateFromText(afterRaw, referenceDate);
+  let effectiveDate = null;
+  if (afterDateRes && afterDateRes.date) {
+    effectiveDate = afterDateRes.date;
+  } else if (originalDateObj) {
+    effectiveDate = new Date(originalDateObj);
+  } else {
+    effectiveDate = new Date(referenceDate);
+  }
+
+  // Parse new time strictly from afterRaw
+  const timeRes = parseTimeFromText(afterRaw, effectiveDate);
+
+  const targetCriteria = {
+    titleKeywords: cleanSubject && cleanSubject !== '日程安排' ? [cleanSubject] : [],
+    originalDate: originalDateObj ? originalDateObj.toISOString().slice(0, 10) : '',
+    originalDateText: originalDateText || '',
+    originalTimeOfDay
+  };
+
+  return {
+    isModification: true,
+    targetCriteria,
+    keepExistingLocation,
+    keepExistingUrl,
+    title: cleanSubject,
+    startDate: timeRes.startDate,
+    endDate: timeRes.endDate,
+    allDay: timeRes.allDay
+  };
+}
+
+/**
+ * Match target criteria against existing schedules list
+ * @param {Object} targetCriteria
+ * @param {Array} schedules
+ * @param {Date} [referenceDate]
+ * @returns {Object|null}
+ */
+export function findMatchingSchedule(targetCriteria, schedules = [], referenceDate = new Date()) {
+  if (!targetCriteria || !Array.isArray(schedules) || schedules.length === 0) {
+    return null;
+  }
+
+  const keywords = (targetCriteria.titleKeywords || [])
+    .map(k => String(k || '').trim().toLowerCase())
+    .filter(k => k && k.length >= 2);
+
+  let bestMatch = null;
+  let highestScore = 0;
+
+  for (const item of schedules) {
+    if (!item) continue;
+    let score = 0;
+    const itemTitle = (item.title || '').trim().toLowerCase();
+    const itemDesc = (item.description || '').trim().toLowerCase();
+
+    // 1. Title keyword matching
+    for (const kw of keywords) {
+      if (itemTitle === kw) {
+        score += 70;
+      } else if (itemTitle.includes(kw) || kw.includes(itemTitle)) {
+        score += 55;
+      } else if (itemDesc.includes(kw)) {
+        score += 25;
+      }
+    }
+
+    // 2. Date matching
+    if (targetCriteria.originalDate && item.startTime) {
+      const targetDate = new Date(targetCriteria.originalDate);
+      const itemStartDate = new Date(item.startTime);
+      if (!isNaN(targetDate.getTime()) && !isNaN(itemStartDate.getTime())) {
+        const isSameDay =
+          targetDate.getFullYear() === itemStartDate.getFullYear() &&
+          targetDate.getMonth() === itemStartDate.getMonth() &&
+          targetDate.getDate() === itemStartDate.getDate();
+
+        if (isSameDay) {
+          score += 40;
+        } else if (targetDate.getDay() === itemStartDate.getDay()) {
+          score += 20;
+        }
+      }
+    }
+
+    // 3. Time of day matching
+    if (targetCriteria.originalTimeOfDay && item.startTime) {
+      const itemStartDate = new Date(item.startTime);
+      if (!isNaN(itemStartDate.getTime())) {
+        const hours = itemStartDate.getHours();
+        const tod = targetCriteria.originalTimeOfDay;
+        if (tod === 'afternoon' && hours >= 12 && hours < 18) {
+          score += 25;
+        } else if (tod === 'morning' && hours >= 6 && hours < 12) {
+          score += 25;
+        } else if (tod === 'evening' && hours >= 18) {
+          score += 25;
+        } else if (tod === 'afternoon' && hours >= 12) {
+          score += 15;
+        }
+      }
+    }
+
+    if (score > highestScore) {
+      highestScore = score;
+      bestMatch = item;
+    }
+  }
+
+  if (highestScore >= 45) {
+    return bestMatch;
+  }
+
+  return null;
+}
+
+/**
+ * Main parser function
+ * @param {string} text - User input schedule text
+ * @param {Date} [referenceDate] - Base date for relative calculations
+ * @returns {Object|null} Parsed event object
+ */
+export function parseScheduleText(text, referenceDate = new Date()) {
+  if (!text || typeof text !== 'string') return null;
+  const trimmed = text.trim();
+  if (!trimmed) return null;
+
+  const now = new Date(referenceDate);
+
+  // Extract explicit URL (meeting link or website)
+  let url = '';
+  const urlMatch = trimmed.match(/(https?:\/\/[^\s]+)/i);
+  if (urlMatch) {
+    url = urlMatch[1];
+  }
+
+  // Extract Tencent Meeting / Zoom meeting numbers
+  const tencentMatch = trimmed.match(/腾讯会议[：:\s]*(\d{3}[-\s]?\d{3}[-\s]?\d{3,4})/i);
+  if (tencentMatch) {
+    const meetingCode = tencentMatch[1].replace(/[-\s]/g, '');
+    const meetingUrl = `https://meeting.tencent.com/dm/${meetingCode}`;
+    if (!url) url = meetingUrl;
+  }
+  const zoomMatch = trimmed.match(/Zoom[：:\s]*(\d{3}[-\s]?\d{3}[-\s]?\d{3,4})/i);
+  if (zoomMatch) {
+    const meetingCode = zoomMatch[1].replace(/[-\s]/g, '');
+    if (!url) url = `zoommtg://zoom.us/join?confno=${meetingCode}`;
+  }
+
+  // Location extraction
+  let location = '';
+  const explicitLocMatch = trimmed.match(/(?:地点|位置|地址|会议室|场所)[：:\s]+([^\n,，;；]+)/i);
+  if (explicitLocMatch) {
+    location = explicitLocMatch[1].trim();
+  }
+
+  if (!location) {
+    const enAtMatches = [...trimmed.matchAll(/\bat\s+([a-zA-Z0-9][a-zA-Z0-9\s]{1,25}?)(?=\s+with|\s+on|\s+for|\s+at|$|[,\.])/gi)];
+    for (const m of enAtMatches) {
+      const candidate = m[1].trim();
+      if (!/^(?:the|a|an|\d+(?::\d+)?\s*(?:am|pm)?)$/i.test(candidate)) {
+        location = candidate;
+        break;
+      }
+    }
+  }
+
+  if (!location) {
+    const inlineLocMatch = trimmed.match(/在\s*([a-zA-Z0-9\u4e00-\u9fa5\-_—\(\)（）#]{2,20}?)(?=\s*(?:开会|举行|集合|碰头|见面|聚餐|举办|进行|线上|等|[，,。！!\n]|$))/i);
+    if (inlineLocMatch) {
+      const candidate = inlineLocMatch[1].trim();
+      if (!/^(今天|明天|后天|昨天|周|星期|上午|下午|晚上|\d+)/.test(candidate)) {
+        location = candidate;
+      }
+    }
+  }
+
+  // 1. Check modification / reschedule intent first
+  const modIntent = detectModificationIntent(trimmed, now);
+  if (modIntent) {
+    return {
+      id: `event-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`,
+      title: modIntent.title || '日程安排',
+      startTime: modIntent.startDate.toISOString(),
+      endTime: modIntent.endDate.toISOString(),
+      allDay: modIntent.allDay,
+      location: location || '',
+      description: trimmed,
+      url: url || '',
+      alarmMinutes: 15,
+      createdAt: new Date().toISOString(),
+      parserType: 'local',
+      isModification: true,
+      keepExistingLocation: modIntent.keepExistingLocation,
+      keepExistingUrl: modIntent.keepExistingUrl,
+      targetCriteria: modIntent.targetCriteria
+    };
+  }
+
+  // 2. Standard parsing for new events
+  let explicitTitle = '';
+  const explicitTitleMatch = trimmed.match(/(?:主题|日程|事项|事件|标题|会议名称)[：:\s]+([^\n,，;；]+)/i);
+  if (explicitTitleMatch) {
+    explicitTitle = explicitTitleMatch[1].trim();
+  }
+
+  const dateRes = parseDateFromText(trimmed, now);
+  const matchedDate = dateRes && dateRes.date ? dateRes.date : new Date(now);
+  const timeRes = parseTimeFromText(trimmed, matchedDate);
+
+  // Title Extraction
   let title = explicitTitle ? cleanEventTitle(explicitTitle) : '';
   if (!title) {
     let cleaned = trimmed;
-
-    // Remove URLs
     cleaned = cleaned.replace(/https?:\/\/[^\s]+/g, '');
     cleaned = cleaned.replace(/腾讯会议[：:\s]*\d{3}[-\s]?\d{3}[-\s]?\d{3,4}/gi, '');
     cleaned = cleaned.replace(/Zoom[：:\s]*\d{3}[-\s]?\d{3}[-\s]?\d{3,4}/gi, '');
-
-    // Remove explicit location fields
     cleaned = cleaned.replace(/(?:地点|位置|地址|会议室|场所)[：:\s]+[^\n,，;；]+/gi, '');
 
-    // Remove English "at [Location]" if location was extracted
     if (location) {
       const escapedLoc = location.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       cleaned = cleaned.replace(new RegExp(`\\bat\\s+${escapedLoc}\\b`, 'i'), '');
       cleaned = cleaned.replace(new RegExp(`在\\s*${escapedLoc}`, 'gi'), '');
     }
 
-    // Remove relative dates (Chinese and English)
     cleaned = cleaned.replace(/(大后天|后天|明天|明日|今天|今日|昨天|昨日)/g, '');
     cleaned = cleaned.replace(/\b(day after tomorrow|tomorrow|today|yesterday)\b/gi, '');
     cleaned = cleaned.replace(/(?:(?:下下周|下下个星期|下下星期|下周末|下周|下个星期|下星期|下礼拜|这周末|本周末|本周|这周|这个星期|这礼拜)\s*[一二三四五六日天末12345670]?|(?:周|星期|礼拜)[一二三四五六日天末12345670])/gi, '');
     cleaned = cleaned.replace(/(\d+|[一二两三四五六七八九十]+)天[之以]?后/g, '');
-
-    // Remove absolute dates
     cleaned = cleaned.replace(/\d{4}[\.\/\-年]\d{1,2}[\.\/\-月]\d{1,2}[日号]?/g, '');
     cleaned = cleaned.replace(/\d{1,2}月\d{1,2}[日号]?/g, '');
-
-    // Remove time expressions
     cleaned = cleaned.replace(/(\d{1,2})[:：](\d{2})\s*(?:-|~|至|到)\s*(\d{1,2})[:：](\d{2})/g, '');
     cleaned = cleaned.replace(/(\d{1,2})[:：](\d{2})(?:[:：](\d{2}))?\s*(?:am|pm)?/gi, '');
     cleaned = cleaned.replace(/(?:上午|下午|晚上|中午|凌晨)?\s*(?:\d{1,2}|[一二两三四五六七八九十]+)\s*点(?:(?:\d{1,2}|半|一刻|三刻)分?)?/g, '');
@@ -451,11 +669,7 @@ export function parseScheduleText(text, referenceDate = new Date()) {
     cleaned = cleaned.replace(/(?:早上|清晨|早晨|上午|中午|下午|傍晚|晚上|夜里|半夜|凌晨)/g, '');
     cleaned = cleaned.replace(/(?:持续|时长|大概|预计)?(?:\d+(?:\.\d+)?|[一二两三四五半]+)\s*(?:个)?(?:小时|分钟|hr|hrs|min|mins)/gi, '');
     cleaned = cleaned.replace(/(?:全天|整天|\ball[\s\-]day\b)/gi, '');
-
-    // Remove filler keywords
     cleaned = cleaned.replace(/(?:提醒我|备忘|安排|请参加|请大家|准时|参加)/g, '');
-
-    // Clean leading/trailing punctuation and whitespace
     cleaned = cleaned.replace(/^[\s,，.。;；:：!！\-—~～]+/g, '').replace(/[\s,，.。;；:：!！\-—~～]+$/g, '');
 
     const candidateLines = cleaned.split(/\r?\n/)
@@ -468,7 +682,6 @@ export function parseScheduleText(text, referenceDate = new Date()) {
   }
 
   title = cleanEventTitle(title);
-
   if (title.length > 60) {
     title = title.substring(0, 60).trim() + '...';
   }
@@ -476,15 +689,18 @@ export function parseScheduleText(text, referenceDate = new Date()) {
   return {
     id: `event-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`,
     title: title || '日程安排',
-    startTime: startDate.toISOString(),
-    endTime: endDate.toISOString(),
-    allDay,
+    startTime: timeRes.startDate.toISOString(),
+    endTime: timeRes.endDate.toISOString(),
+    allDay: timeRes.allDay,
     location: location || '',
     description: trimmed,
     url: url || '',
     alarmMinutes: 15,
     createdAt: new Date().toISOString(),
-    parserType: 'local'
+    parserType: 'local',
+    isModification: false,
+    keepExistingLocation: false,
+    targetCriteria: null
   };
 }
 
@@ -583,7 +799,10 @@ export async function parseScheduleWithGemma(text, options = {}) {
     url: d.url || '',
     alarmMinutes: 15,
     createdAt: new Date().toISOString(),
-    parserType: 'gemma-4-26b-a4b-it'
+    parserType: 'gemma-4-26b-a4b-it',
+    isModification: !!d.isModification,
+    keepExistingLocation: !!d.keepExistingLocation,
+    targetCriteria: d.targetCriteria || null
   };
 }
 
