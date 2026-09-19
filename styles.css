@@ -146,39 +146,6 @@ body {
   transition: all 0.2s ease;
 }
 
-/* PWA Install Banner */
-.install-banner {
-  display: none;
-  background: linear-gradient(135deg, rgba(79, 70, 229, 0.08) 0%, rgba(124, 58, 237, 0.08) 100%);
-  border: 1px solid var(--primary-border);
-  padding: 12px 16px;
-  border-radius: var(--radius-md);
-  margin-bottom: 20px;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.install-banner.show {
-  display: flex;
-}
-
-.install-info {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  font-size: 0.88rem;
-  font-weight: 500;
-  color: var(--text-primary);
-}
-
-.banner-actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-shrink: 0;
-}
-
 /* Input Section */
 .input-header {
   display: flex;

@@ -13,7 +13,6 @@ let autoDownloadEnabled = true;
 let useAiEnabled = true;
 let cfAccountId = '';
 let cfApiToken = '';
-let deferredInstallPrompt = null;
 let lastDownloadedText = '';
 let debounceTimer = null;
 let autoDownloadTimer = null;
@@ -43,9 +42,6 @@ const emptyState = document.getElementById('emptyState');
 const scheduleCount = document.getElementById('scheduleCount');
 const cleanupBtn = document.getElementById('cleanupBtn');
 const clearAllBtn = document.getElementById('clearAllBtn');
-const installAppBtn = document.getElementById('installAppBtn');
-const installBanner = document.getElementById('installBanner');
-const bannerInstallBtn = document.getElementById('bannerInstallBtn');
 const toastContainer = document.getElementById('toastContainer');
 
 // Modal Elements
@@ -878,34 +874,7 @@ function setupPWA() {
     });
   }
 
-  // Listen for beforeinstallprompt
-  window.addEventListener('beforeinstallprompt', (e) => {
-    e.preventDefault();
-    deferredInstallPrompt = e;
-    installAppBtn.style.display = 'inline-flex';
-    installBanner.classList.add('show');
-  });
-
-  const triggerInstall = () => {
-    if (!deferredInstallPrompt) return;
-    deferredInstallPrompt.prompt();
-    deferredInstallPrompt.userChoice.then((choiceResult) => {
-      if (choiceResult.outcome === 'accepted') {
-        showToast('感谢安装日程生成器！', 'success');
-      }
-      deferredInstallPrompt = null;
-      installAppBtn.style.display = 'none';
-      installBanner.classList.remove('show');
-    });
-  };
-
-  installAppBtn.addEventListener('click', triggerInstall);
-  bannerInstallBtn.addEventListener('click', triggerInstall);
-
   window.addEventListener('appinstalled', () => {
-    deferredInstallPrompt = null;
-    installAppBtn.style.display = 'none';
-    installBanner.classList.remove('show');
     showToast('日程生成器已成功安装至桌面/主屏幕', 'success');
   });
 }
@@ -915,12 +884,9 @@ function setupPWA() {
  */
 function setupNativePlatform() {
   if (isNativeApp()) {
-    // Hide download APK button and PWA install buttons in native app
+    // Hide download APK button in native app
     const downloadApkBtn = document.getElementById('downloadApkBtn');
     if (downloadApkBtn) downloadApkBtn.style.display = 'none';
-
-    if (installAppBtn) installAppBtn.style.display = 'none';
-    if (installBanner) installBanner.classList.remove('show');
 
     // Update main action button text
     if (generateBtn) {
