@@ -651,7 +651,13 @@ async function processAndGenerate(text, triggerDownload = true, force = false) {
   displayInPreview(event, isAiEvent, false);
 
   if (triggerDownload || isPausedByUser) {
-    await openCalendarEvent(event);
+    const calRes = await openCalendarEvent(event);
+    if (calRes && calRes.cancelled) {
+      showToast('已取消加入系统日历', 'info');
+      resetGenerateBtn();
+      isPausedByUser = false;
+      return event;
+    }
     if (isPausedByUser) {
       if (isUpdatedExisting) {
         const successMsg = isNativeApp()
@@ -673,7 +679,7 @@ async function processAndGenerate(text, triggerDownload = true, force = false) {
         showToast(successMsg, 'success');
       } else {
         const successMsg = isNativeApp()
-          ? `已唤起系统日历: ${event.title}${engineName}`
+          ? `已确认并加入系统日历: ${event.title}${engineName}`
           : `已下载 .ics 文件: ${event.title}${engineName}`;
         showToast(successMsg, 'success');
       }
@@ -697,8 +703,8 @@ function setupListeners() {
       const parsed = updatePreview();
       const currentText = scheduleInput.value.trim();
 
-      // If auto-download enabled and text has changed significantly
-      if (autoDownloadEnabled && parsed && currentText.length >= 4 && currentText !== lastDownloadedText) {
+      // If auto-download enabled and text has changed significantly (Web only, APK requires explicit button click/confirmation)
+      if (autoDownloadEnabled && !isNativeApp() && parsed && currentText.length >= 4 && currentText !== lastDownloadedText) {
         autoDownloadTimer = setTimeout(() => {
           processAndGenerate(currentText, true, false);
         }, 1600);
@@ -706,7 +712,7 @@ function setupListeners() {
     }, 300);
   });
 
-  // Paste event - fast auto-download trigger
+  // Paste event - fast auto-download trigger (Web only)
   scheduleInput.addEventListener('paste', () => {
     clearTimeout(debounceTimer);
     clearTimeout(autoDownloadTimer);
@@ -716,7 +722,7 @@ function setupListeners() {
       clearTimeout(autoDownloadTimer);
       const parsed = updatePreview();
       const text = scheduleInput.value.trim();
-      if (autoDownloadEnabled && parsed && text !== lastDownloadedText) {
+      if (autoDownloadEnabled && !isNativeApp() && parsed && text !== lastDownloadedText) {
         processAndGenerate(text, true, false);
       }
     }, 100);
@@ -900,8 +906,12 @@ function setupListeners() {
       const id = redownloadBtn.getAttribute('data-id');
       const item = schedules.find(s => s.id === id);
       if (item) {
-        openCalendarEvent(item).then(() => {
-          showToast(isNativeApp() ? `已唤起系统日历: ${item.title}` : `已下载 .ics 文件: ${item.title}`, 'success');
+        openCalendarEvent(item).then((res) => {
+          if (res && res.cancelled) {
+            showToast('已取消加入系统日历', 'info');
+          } else {
+            showToast(isNativeApp() ? `已确认并加入系统日历: ${item.title}` : `已下载 .ics 文件: ${item.title}`, 'success');
+          }
         });
       }
       return;

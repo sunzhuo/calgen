@@ -88,7 +88,7 @@ async function testWebDownloadFlow() {
 
 await testWebDownloadFlow();
 
-// Test 3: Direct CalendarProvider Insertion flow via NativeCalendarPlugin
+// Test 3: Direct CalendarProvider Insertion flow via NativeCalendarPlugin with User Confirmation
 let capturedDirectParams = null;
 globalThis.Capacitor = {
   isNativePlatform: () => true,
@@ -131,16 +131,42 @@ async function testNativeDirectCalendarFlow() {
   assert.strictEqual(capturedDirectParams.alarmMinutes, 15);
   assert.strictEqual(capturedDirectParams.openMode, 'view');
   assert.ok(capturedDirectParams.description.startsWith('地点：科技楼302'));
-  console.log('✔ NativeCalendar direct insert flow passed!');
+  console.log('✔ NativeCalendar direct insert flow with confirmation passed!');
 }
 
 await testNativeDirectCalendarFlow();
 
-// Test 4: Fallback flow to createEventWithPrompt when NativeCalendar fails
+// Test 4: User cancels confirmation dialog in NativeCalendar
+globalThis.Capacitor.Plugins.NativeCalendar = {
+  createAndOpenEvent: async () => {
+    return { success: false, cancelled: true };
+  }
+};
+
+async function testNativeUserCancelFlow() {
+  const cancelTestEvent = {
+    id: 'cancel-test-event',
+    title: '不确定的会议',
+    startTime: '2026-09-28T10:00:00',
+    endTime: '2026-09-28T11:00:00',
+    location: '待定',
+    description: '可能取消'
+  };
+
+  const res = await openCalendarEvent(cancelTestEvent);
+  console.log('openCalendarEvent user cancelled result:', res);
+  assert.strictEqual(res.success, false);
+  assert.strictEqual(res.cancelled, true);
+  console.log('✔ User cancellation handled cleanly without fallback or insertion!');
+}
+
+await testNativeUserCancelFlow();
+
+// Test 5: Fallback flow to createEventWithPrompt when NativeCalendar errors/unimplemented
 let capturedPromptParams = null;
 globalThis.Capacitor.Plugins.NativeCalendar = {
   createAndOpenEvent: async () => {
-    throw new Error('Permission denied or NativeCalendar unavailable');
+    throw new Error('NativeCalendar unavailable');
   }
 };
 globalThis.Capacitor.Plugins.CapacitorCalendar = {

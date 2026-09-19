@@ -275,8 +275,12 @@ export async function openCalendarEvent(event, options = {}) {
           location: loc,
           description: finalDescription,
           alarmMinutes: event.alarmMinutes !== undefined ? event.alarmMinutes : 15,
-          openMode: options.openMode || 'view' // 'view' 打开详情查看，或 'edit' 打开编辑页
+          openMode: options.openMode || 'view', // 'view' 打开详情查看，或 'edit' 打开编辑页
+          skipConfirm: Boolean(options.skipConfirm)
         });
+        if (directRes && directRes.cancelled) {
+          return { success: false, cancelled: true };
+        }
         if (directRes && directRes.success) {
           return { success: true, method: 'native_direct', eventId: directRes.eventId };
         }

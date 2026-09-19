@@ -1,6 +1,7 @@
 package dev.pages.calgen;
 
 import android.Manifest;
+import android.app.AlertDialog;
 import android.content.ContentResolver;
 import android.content.ContentUris;
 import android.content.ContentValues;
@@ -20,6 +21,9 @@ import com.getcapacitor.annotation.CapacitorPlugin;
 import com.getcapacitor.annotation.Permission;
 import com.getcapacitor.annotation.PermissionCallback;
 
+import java.text.SimpleDateFormat;
+import java.util.Date;
+import java.util.Locale;
 import java.util.TimeZone;
 
 @CapacitorPlugin(
@@ -71,24 +75,23 @@ public class NativeCalendarPlugin extends Plugin {
             requestPermissionForAlias("calendar", call, "createEventPermissionCallback");
             return;
         }
-        doCreateAndOpenEvent(call);
+        prepareAndConfirmEvent(call);
     }
 
     @PermissionCallback
     private void createEventPermissionCallback(PluginCall call) {
         if (getPermissionState("calendar") == PermissionState.GRANTED) {
-            doCreateAndOpenEvent(call);
+            prepareAndConfirmEvent(call);
         } else {
             call.reject("Calendar permission denied by user");
         }
     }
 
-    private void doCreateAndOpenEvent(PluginCall call) {
+    private void prepareAndConfirmEvent(PluginCall call) {
         try {
             String title = call.getString("title", "日程安排");
             Long startTime = call.getLong("startTime");
             if (startTime == null) {
-                // Also check startDate or beginTime
                 startTime = call.getLong("startDate");
                 if (startTime == null) {
                     startTime = call.getLong("beginTime");
@@ -122,7 +125,108 @@ public class NativeCalendarPlugin extends Plugin {
             String description = call.getString("description", "");
             Integer alarmMinutes = call.getInt("alarmMinutes", 15);
             String openMode = call.getString("openMode", "view"); // "view" or "edit"
+            boolean skipConfirm = Boolean.TRUE.equals(call.getBoolean("skipConfirm", false));
 
+            if (skipConfirm) {
+                executeInsertAndOpen(call, title, startTime, endTime, allDay, location, description, alarmMinutes, openMode);
+                return;
+            }
+
+            // Build confirmation dialog for user approval before writing to CalendarProvider
+            final String finalTitle = title;
+            final Long finalStartTime = startTime;
+            final Long finalEndTime = endTime;
+            final boolean finalAllDay = allDay;
+            final String finalLocation = location;
+            final String finalDescription = description;
+            final Integer finalAlarmMinutes = alarmMinutes;
+            final String finalOpenMode = openMode;
+
+            getActivity().runOnUiThread(() -> {
+                try {
+                    AlertDialog.Builder builder = new AlertDialog.Builder(getActivity());
+                    builder.setTitle("确认加入系统日历？");
+
+                    StringBuilder msg = new StringBuilder();
+                    msg.append("📌 日程：").append(finalTitle).append("\n\n");
+
+                    SimpleDateFormat dateFormat = new SimpleDateFormat("yyyy年M月d日 HH:mm", Locale.getDefault());
+                    SimpleDateFormat timeFormat = new SimpleDateFormat("HH:mm", Locale.getDefault());
+                    SimpleDateFormat dayFormat = new SimpleDateFormat("yyyy年M月d日", Locale.getDefault());
+
+                    msg.append("⏰ 时间：");
+                    if (finalAllDay) {
+                        msg.append(dayFormat.format(new Date(finalStartTime))).append(" (全天)");
+                    } else {
+                        msg.append(dateFormat.format(new Date(finalStartTime)));
+                        msg.append(" - ").append(timeFormat.format(new Date(finalEndTime)));
+                    }
+                    msg.append("\n\n");
+
+                    if (finalLocation != null && !finalLocation.isEmpty()) {
+                        msg.append("📍 地点：").append(finalLocation).append("\n\n");
+                    }
+
+                    if (finalDescription != null && !finalDescription.isEmpty()) {
+                        String cleanDesc = finalDescription;
+                        if (finalLocation != null && cleanDesc.startsWith("地点：" + finalLocation)) {
+                            cleanDesc = cleanDesc.substring(("地点：" + finalLocation).length()).trim();
+                        }
+                        if (!cleanDesc.isEmpty()) {
+                            if (cleanDesc.length() > 80) {
+                                cleanDesc = cleanDesc.substring(0, 77) + "...";
+                            }
+                            msg.append("📝 备注：").append(cleanDesc);
+                        }
+                    }
+
+                    builder.setMessage(msg.toString().trim());
+
+                    builder.setPositiveButton("确认添加", (dialog, which) -> {
+                        executeInsertAndOpen(call, finalTitle, finalStartTime, finalEndTime, finalAllDay, finalLocation, finalDescription, finalAlarmMinutes, finalOpenMode);
+                    });
+
+                    builder.setNegativeButton("取消", (dialog, which) -> {
+                        JSObject ret = new JSObject();
+                        ret.put("success", false);
+                        ret.put("cancelled", true);
+                        call.resolve(ret);
+                    });
+
+                    builder.setOnCancelListener(dialog -> {
+                        JSObject ret = new JSObject();
+                        ret.put("success", false);
+                        ret.put("cancelled", true);
+                        call.resolve(ret);
+                    });
+
+                    AlertDialog dialog = builder.create();
+                    dialog.setCanceledOnTouchOutside(true);
+                    dialog.show();
+                } catch (Exception e) {
+                    Log.e(TAG, "Error showing confirmation dialog", e);
+                    executeInsertAndOpen(call, finalTitle, finalStartTime, finalEndTime, finalAllDay, finalLocation, finalDescription, finalAlarmMinutes, finalOpenMode);
+                }
+            });
+
+        } catch (Exception e) {
+            Log.e(TAG, "Error in prepareAndConfirmEvent", e);
+            call.reject("Failed to prepare event: " + e.getMessage(), e);
+        }
+    }
+
+    private void executeInsertAndOpen(
+        PluginCall call,
+        String title,
+        Long startTime,
+        Long endTime,
+        boolean allDay,
+        String location,
+        String description,
+        Integer alarmMinutes,
+        String openMode
+    ) {
+        try {
             Context context = getContext();
             long calendarId = getWritableCalendarId(context);
 
@@ -150,7 +254,7 @@ public class NativeCalendarPlugin extends Plugin {
             }
 
             long eventId = ContentUris.parseId(eventUri);
-            Log.d(TAG, "Successfully inserted event directly into CalendarProvider. eventId: " + eventId + ", location: " + location);
+            Log.d(TAG, "Successfully inserted event directly into CalendarProvider after user confirmation. eventId: " + eventId + ", location: " + location);
 
             // Insert reminder alert if requested
             if (alarmMinutes != null && alarmMinutes >= 0) {
@@ -191,7 +295,7 @@ public class NativeCalendarPlugin extends Plugin {
             call.resolve(result);
 
         } catch (Exception e) {
-            Log.e(TAG, "Error in doCreateAndOpenEvent", e);
+            Log.e(TAG, "Error in executeInsertAndOpen", e);
             call.reject("Failed to create and open event: " + e.getMessage(), e);
         }
     }
@@ -262,4 +366,3 @@ public class NativeCalendarPlugin extends Plugin {
         return 1L;
     }
 }
-
