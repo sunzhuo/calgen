@@ -9,7 +9,11 @@ const testCases = [
   '2026-10-01 全天 国庆放假',
   '今天晚上8点看电影 持续2小时',
   '周三下午2点半 腾讯会议：123-456-789 讨论需求',
-  'Doctor appointment tomorrow at 3pm at Clinic'
+  'Doctor appointment tomorrow at 3pm at Clinic',
+  '孙卓，我有两个博士计划下周二上午八点半预答辩，你有时间吧？',
+  '孙卓，我有两个博士计划下周二上午八点半在科技楼302预答辩，你有时间吧？',
+  '张老师，我们打算明天下午3点在315会议室开项目周会，方便吗？',
+  '下周二上午八点半预答辩，地点在主楼402，你有空吗？'
 ];
 
 const refDate = new Date('2026-09-18T10:00:00Z');

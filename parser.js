@@ -76,20 +76,42 @@ export function cleanEventTitle(rawTitle) {
   // e.g., 各位老师下午好, 各位领导好, 老师们好, 大家好, 亲爱的同事们, Hi all, Good morning, etc.
   t = t.replace(/^(?:各位(?:老师|领导|同事|同学|朋友|专家|会员|同仁|代表|家长|评审|评委)?(?:下午好|上午好|中午好|晚上好|好)?|[大各]家(?:下午好|上午好|中午好|晚上好|好)?|亲爱的.+?[好！!，,\s]|(?:Good\s+(?:morning|afternoon|evening)|Hi|Hello|Dear)\s+[^,，!！]+[,，!！]?)+[\s,，:：\-]*/i, '');
 
-  // 3. Strip notification / announcement prefixes
+  // 3. Strip recipient vocatives at the beginning (e.g. "孙卓，", "张老师：", "@所有人 ", "@李工: ")
+  t = t.replace(/^(?:[A-Za-z\u4e00-\u9fa5]{2,5}|@\S+)[，,：:\s]+(?=(?:我|咱|请|有|下周|明天|后天|今天|关于|原定|现|麻烦|想|由于|因|各位))/i, '');
+
+  // 4. Strip notification / announcement prefixes
   // e.g., 关于召开..., 关于举办..., 会议通知:, 通知:, 日程安排:
   t = t.replace(/^(?:关于(?:举办|召开|组织|开展)?|通知[：:]|紧急通知[：:]|会议通知[：:]|日程安排[：:]|日程[：:])/g, '');
 
-  // 4. Strip announcement boilerplate suffixes: ...安排如下, ...日程如下, ...通知如下, 如下, 的通知, 的安排
-  // Note: Carefully keep the core subject intact (e.g. 预答辩, 答辩, 总结会)
+  // 5. Strip first-person and conversational intent prefixes
+  // e.g., "我有两个博士计划预答辩" -> "两个博士计划预答辩", "我们打算开项目周会" -> "开项目周会"
+  t = t.replace(/^(?:我(?:们)?|咱(?:们)?)(?:[这里边儿]+)?(?:[有想打算计划准备要需]|希望|拟|预备|准备)+[\s,，]*/i, '');
+  t = t.replace(/^(?:请问|麻烦问下|想问下|想请问|不知道你?|请问下)[\s,，]*/i, '');
+
+  // 6. Strip intermediate intent verbs before core schedule verbs/nouns
+  // e.g., "两个博士计划预答辩" -> "两个博士预答辩"
+  t = t.replace(/(?:\s*(?:计划|准备|打算|拟|预备)\s*)(?=(?:预答辩|答辩|开会|讨论|评审|评审会|研讨|汇报|开题|开题报告|结题|复试|面试|聚餐|碰头|交流|上线|发布))/i, '');
+
+  // 7. Strip leading action verbs like "开", "参加", "举行", "举办" if followed by event noun
+  // e.g. "开团队周会" -> "团队周会", "举行答辩" -> "答辩"
+  t = t.replace(/^(?:开|举行|举办|参加|召开)\s*(?=[A-Za-z0-9\u4e00-\u9fa5]{2,}(?:周会|例会|会议|答辩|预答辩|评审|研讨|讨论|汇报|宣讲|典礼|仪式|发布会))/i, '');
+
+  // 8. Strip announcement boilerplate suffixes: ...安排如下, ...日程如下, ...通知如下, 如下, 的通知, 的安排
   t = t.replace(/(?:的?(?:工作|日程|会议)?安排如下[：:]*|安排如下[：:]*|日程如下[：:]*|通知如下[：:]*|如下[：:]*|的通知|的安排)$/g, '');
 
-  // 5. Strip polite calls to action: 请各位老师预留时间参加, 请准时出席, 谢谢
+  // 9. Strip polite calls to action and closing conversational question tags
+  // e.g., 请各位老师预留时间参加, 请准时出席, 谢谢, 收到请回复
   t = t.replace(/请(?:各位|大家)?.+?(?:参加|出席|预留时间).*$/g, '');
   t = t.replace(/(?:谢谢|致谢|收到请回复).*$/g, '');
+  // Question tags / availability checks: 你有时间吧？, 方便吗？, 能来吗？, 可以吗？
+  t = t.replace(/(?:[，,、\s]*(?:你?有(?:时间|空)(?:吗|吧|不|呀|呢)?|方便(?:吗|吧|不|呀|呢)?|你方便(?:吗|吧|不|呀|呢)?|你?能(?:来|参加)(?:吗|吧|不)?|能来(?:吗|吧|不)?|能参加(?:吗|吧|不)?|可以吗|可以吧|行不行|好不好|好吗|成吗|吗|吧|么)[\?？!！]*)+$/i, '');
 
-  // 6. Clean leading/trailing punctuation and whitespace
-  t = t.replace(/^[\s,，.。;；:：!！\-—~～\(\)（）]+|[\s,，.。;；:：!！\-—~～\(\)（）]+$/g, '').trim();
+  // 10. Strip residual location remnants: e.g. "，地点，", "地点："
+  t = t.replace(/^[，,、\s]*地点[：:\s,，]*/i, '');
+  t = t.replace(/[，,、\s]*地点[：:\s,，]*$/i, '');
+
+  // 11. Clean leading/trailing punctuation, quotes, and whitespace
+  t = t.replace(/^[\s,，.。;；:：!！\-—~～\(\)（）"“'‘\[\]【】]+|[\s,，.。;；:：!！\-—~～\(\)（）"”'’\[\]【】\?？]+$/g, '').trim();
 
   return t || '日程安排';
 }
@@ -582,11 +604,18 @@ export function parseScheduleText(text, referenceDate = new Date()) {
 
   // Location extraction
   let location = '';
-  const explicitLocMatch = trimmed.match(/(?:地点|位置|地址|会议室|场所)[：:\s]+([^\n,，;；]+)/i);
+
+  // 1. Explicit location label: 地点：..., 地点在..., 位置在..., 会议室：...
+  const explicitLocMatch = trimmed.match(/(?:(?:开会|活动|面试|答辩|预答辩|培训|会商|集合)?地点|位置|地址|会议室|场所)(?:[：:\s]+|(?:[在为设于]+[\s：:]*))([^\n,，;；]+)/i);
   if (explicitLocMatch) {
-    location = explicitLocMatch[1].trim();
+    let cand = explicitLocMatch[1].trim();
+    cand = cand.replace(/[，,、\s]*(?:你有时间|你有空|方便|你能来|可以吗|行不行|预答辩|答辩|开会).*$/i, '').trim();
+    if (cand && !/^(今天|明天|后天|昨天|周|星期|上午|下午|晚上|\d+)/.test(cand)) {
+      location = cand;
+    }
   }
 
+  // 2. English "at <location>"
   if (!location) {
     const enAtMatches = [...trimmed.matchAll(/\bat\s+([a-zA-Z0-9][a-zA-Z0-9\s]{1,25}?)(?=\s+with|\s+on|\s+for|\s+at|$|[,\.])/gi)];
     for (const m of enAtMatches) {
@@ -598,13 +627,41 @@ export function parseScheduleText(text, referenceDate = new Date()) {
     }
   }
 
+  // 3. Inline "在 <location> [动词/事件/标点]"
   if (!location) {
-    const inlineLocMatch = trimmed.match(/在\s*([a-zA-Z0-9\u4e00-\u9fa5\-_—\(\)（）#]{2,20}?)(?=\s*(?:开会|举行|集合|碰头|见面|聚餐|举办|进行|线上|等|[，,。！!\n]|$))/i);
+    const inlineLocMatch = trimmed.match(/在\s*([a-zA-Z0-9\u4e00-\u9fa5\-_—\(\)（）#]{2,25}?)(?=\s*(?:[，,。！!\n]|$|开(?:会|例会|周会|项目|讨论|评审|宣讲|庭)?|举行|集合|碰头|见面|聚餐|举办|进行|线上|等|答辩|预答辩|上课|研讨|评审|讨论|汇报|培训|面试|会商|组织|签到|签合同|有\d+个|有[一二两三四五六七八九十]+个|计划|打算|准备))/i);
     if (inlineLocMatch) {
       const candidate = inlineLocMatch[1].trim();
       if (!/^(今天|明天|后天|昨天|周|星期|上午|下午|晚上|\d+)/.test(candidate)) {
         location = candidate;
       }
+    }
+  }
+
+  // 4. Physical venue keywords: e.g. 科技楼302, 主楼报告厅, 315会议室
+  if (!location) {
+    const venueMatch = trimmed.match(/(?:在\s*)?([A-Za-z0-9#\-_]{1,10}?(?:会议室|报告厅|研讨室|研讨厅|办公室|教室|实验室|大厦|大楼|学院楼|教学楼|综合楼|科技楼|主楼|南楼|北楼|东楼|西楼|\d+层|\d+楼|\d{3,4}室|[A-Z]\d{2,4}|操场|体育馆|食堂)|[一-龥]{2,8}(?:会议室|报告厅|研讨室|研讨厅|办公室|教室|实验室|大厦|大楼|学院楼|教学楼|综合楼|科技楼|主楼|南楼|北楼|东楼|西楼|操场|体育馆|食堂)(?:\s*\d{3,4}室?)?)/);
+    if (venueMatch) {
+      let candidate = venueMatch[1].trim();
+      candidate = candidate.replace(/^(?:在|地点在|地点为)\s*/, '');
+      if (!/^(今天|明天|后天|昨天|周|星期|上午|下午|晚上)/.test(candidate)) {
+        location = candidate;
+      }
+    }
+  }
+
+  // 5. Online meeting location fallback: Tencent Meeting or Zoom
+  if (!location) {
+    if (tencentMatch) {
+      const code = tencentMatch[1].trim();
+      location = `腾讯会议 ${code}`;
+    } else if (zoomMatch) {
+      const code = zoomMatch[1].trim();
+      location = `Zoom ${code}`;
+    } else if (/腾讯会议/i.test(trimmed)) {
+      location = '腾讯会议';
+    } else if (/Zoom/i.test(trimmed)) {
+      location = 'Zoom';
     }
   }
 
@@ -648,12 +705,12 @@ export function parseScheduleText(text, referenceDate = new Date()) {
     cleaned = cleaned.replace(/https?:\/\/[^\s]+/g, '');
     cleaned = cleaned.replace(/腾讯会议[：:\s]*\d{3}[-\s]?\d{3}[-\s]?\d{3,4}/gi, '');
     cleaned = cleaned.replace(/Zoom[：:\s]*\d{3}[-\s]?\d{3}[-\s]?\d{3,4}/gi, '');
-    cleaned = cleaned.replace(/(?:地点|位置|地址|会议室|场所)[：:\s]+[^\n,，;；]+/gi, '');
+    cleaned = cleaned.replace(/(?:(?:开会|活动|面试|答辩|预答辩|培训|会商|集合)?地点|位置|地址|会议室|场所)(?:[：:\s]+|(?:[在为设于]+[\s：:]*))[^\n,，;；]+/gi, '');
 
     if (location) {
       const escapedLoc = location.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       cleaned = cleaned.replace(new RegExp(`\\bat\\s+${escapedLoc}\\b`, 'i'), '');
-      cleaned = cleaned.replace(new RegExp(`在\\s*${escapedLoc}`, 'gi'), '');
+      cleaned = cleaned.replace(new RegExp(`(?:(?:开会|活动|面试|答辩|预答辩|培训|会商|集合)?地点|位置|地址|会议室|场所)?(?:[在为设于]+[\\s：:]*)?${escapedLoc}`, 'gi'), '');
     }
 
     cleaned = cleaned.replace(/(大后天|后天|明天|明日|今天|今日|昨天|昨日)/g, '');
@@ -705,6 +762,44 @@ export function parseScheduleText(text, referenceDate = new Date()) {
 }
 
 export const GEMMA_MODEL_ID = '@cf/google/gemma-4-26b-a4b-it';
+export const DEFAULT_REMOTE_API = 'https://calgen.pages.dev/api/parse';
+
+/**
+ * Check if code is running inside Capacitor native platform
+ */
+export function isRunningInNativeApp() {
+  if (typeof window !== 'undefined' && window.Capacitor) {
+    if (typeof window.Capacitor.isNativePlatform === 'function') {
+      return window.Capacitor.isNativePlatform();
+    }
+  }
+  if (typeof globalThis !== 'undefined' && globalThis.Capacitor) {
+    if (typeof globalThis.Capacitor.isNativePlatform === 'function') {
+      return globalThis.Capacitor.isNativePlatform();
+    }
+  }
+  return false;
+}
+
+/**
+ * Get effective API endpoint for Gemma 4 AI parsing
+ * Automatically uses remote production endpoint when running in Capacitor APK or local origins
+ */
+export function getEffectiveApiEndpoint(customEndpoint = '') {
+  if (customEndpoint && customEndpoint.trim()) {
+    return customEndpoint.trim();
+  }
+  if (typeof window !== 'undefined') {
+    if (isRunningInNativeApp() ||
+        window.location.protocol === 'capacitor:' ||
+        window.location.protocol === 'file:' ||
+        window.location.hostname === 'localhost' ||
+        window.location.hostname === '127.0.0.1') {
+      return DEFAULT_REMOTE_API;
+    }
+  }
+  return '/api/parse';
+}
 
 /**
  * Parse schedule using Cloudflare Workers AI model @cf/google/gemma-4-26b-a4b-it
@@ -713,13 +808,14 @@ export const GEMMA_MODEL_ID = '@cf/google/gemma-4-26b-a4b-it';
  * @returns {Promise<Object>}
  */
 export async function parseScheduleWithGemma(text, options = {}) {
+  const effectiveEndpoint = getEffectiveApiEndpoint(options.apiEndpoint);
   const {
-    apiEndpoint = '/api/parse',
+    apiEndpoint = effectiveEndpoint,
     accountId = '',
     apiToken = '',
     referenceDate = new Date(),
     signal = null,
-    timeoutMs = 8000
+    timeoutMs = 12000
   } = options;
 
   const headers = {

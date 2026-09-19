@@ -54,11 +54,11 @@ Current Reference Time: ${yyyy}-${mm}-${dd} ${hh}:${min} (${currentWeekday}), Ti
 
 Extract the schedule event from the user's text and respond ONLY with a valid JSON object matching this schema:
 {
-  "title": "string (strictly concise core event subject, e.g. 赵帅奇博士预答辩, 项目周会, 财务审计沟通会)",
+  "title": "string (strictly concise core event noun phrase, e.g. 两个博士预答辩, 赵帅奇博士预答辩, 项目周会, 财务审计沟通会)",
   "startTime": "string (ISO 8601 local date-time format YYYY-MM-DDTHH:mm:ss for the updated/new schedule)",
   "endTime": "string (ISO 8601 local date-time format YYYY-MM-DDTHH:mm:ss for the updated/new schedule)",
   "allDay": boolean,
-  "location": "string (physical location or room, or empty string)",
+  "location": "string (physical location/room, or online meeting info like 腾讯会议 123-456-789, or empty string)",
   "description": "string (original raw notes or details)",
   "url": "string (meeting link or URL if mentioned, e.g. Tencent Meeting link https://meeting.tencent.com/dm/xxx, Zoom link, or empty string)",
   "isModification": boolean,
@@ -72,13 +72,20 @@ Extract the schedule event from the user's text and respond ONLY with a valid JS
 
 Rules:
 1. Title Rules:
-   - The title MUST be extremely concise, clean, and directly identify the event/meeting subject (e.g. "赵帅奇博士预答辩", "预答辩", "团队周会", "2026年Q3需求评审").
-   - STRICTLY strip all conversational greetings and salutations (e.g. "各位老师下午好", "大家好", "各位同事好", "各位领导好", "Hi all", "Dear team").
+   - The title MUST be an extremely concise, clean noun or noun phrase (名词或名词短语，如 "两个博士预答辩", "预答辩", "项目周会", "团队周会", "2026年Q3需求评审").
+   - If key participant quantities are part of the core subject (e.g. "两个博士"), combine them into the noun phrase: "两个博士预答辩".
+   - STRICTLY strip all recipient names and vocatives at the beginning (e.g. "孙卓，", "张老师：", "@所有人", "各位同事好").
+   - STRICTLY strip first-person subject prefixes and intent verbs (e.g. "我有...", "我们计划...", "打算...", "我想约你...").
+   - STRICTLY strip conversational question tags, availability checks, or polite closing queries at the end (e.g. "你有时间吧？", "你有空吗？", "方便吗？", "你能参加吗？", "收到请回复").
    - STRICTLY strip announcement/notice boilerplate phrasing (e.g. "...安排如下", "...日程如下", "...通知如下", "...的通知", "关于召开...", "请各位老师预留时间参加", etc.).
    - STRICTLY strip modification/reschedule connectors and reasons from title (e.g. "由于有老师...有课", "因此...时间改为...", "改为", "调整为"). The title must only be the core event name (e.g. "预答辩").
    - Do NOT include dates, times, locations, emojis (like [握手]), or polite closing words in the title.
-2. Relative dates (e.g. 今天, 明天, 后天, 下周五, 本周三, 3天后, tomorrow) must be calculated strictly relative to Current Reference Time (${yyyy}-${mm}-${dd}).
-3. Modification / Reschedule Rules:
+2. Location Rules:
+   - Extract the physical location or room (e.g. "科技楼302", "315会议室", "主楼报告厅").
+   - NEVER include verbs or event names in location (e.g. "在科技楼302预答辩" -> location: "科技楼302", NOT "科技楼302预答辩").
+   - If it is an online meeting (e.g. Tencent Meeting / Zoom) and no physical location is given, set "location" to "腾讯会议 123-456-789" or "Zoom 123-456-789" so calendar apps display the location field clearly.
+3. Relative dates (e.g. 今天, 明天, 后天, 下周五, 本周三, 3天后, tomorrow) must be calculated strictly relative to Current Reference Time (${yyyy}-${mm}-${dd}).
+4. Modification / Reschedule Rules:
    - If the user's text expresses an intent to change, update, or reschedule an existing or previously scheduled event (e.g. contains "改为", "改到", "调整为", "推迟", "提前", "原定...改...", "由于...有课，预答辩时间改为..."):
      * Set "isModification": true.
      * Populate "targetCriteria":
@@ -88,12 +95,17 @@ Rules:
      * If text indicates the location remains the same (e.g. "地点不变", "原地点", "地点同上", "原会议室"), set "keepExistingLocation": true.
      * Compute "startTime" and "endTime" strictly for the NEW rescheduled time (e.g. "上午9:30" on that same day).
    - If the text is a regular new event (not a modification/reschedule), set "isModification": false, "keepExistingLocation": false, and "targetCriteria": null.
-4. If end time is not explicitly specified:
+5. If end time is not explicitly specified:
    - If duration is mentioned (e.g. 持续2小时, 30分钟), add duration to startTime.
    - If no duration is mentioned and it's not allDay, default endTime to 1 hour after startTime.
    - If allDay is true, startTime and endTime should have the same date with 00:00:00.
-5. Tencent meeting number like 123-456-789 should be converted to https://meeting.tencent.com/dm/123456789 in the "url" field.
-6. Output MUST be strictly valid JSON without any markdown code fence blocks or extra explanation.`;
+6. Tencent meeting number like 123-456-789 should be converted to https://meeting.tencent.com/dm/123456789 in the "url" field.
+7. Few-Shot Examples:
+   - Input: "孙卓，我有两个博士计划下周二上午八点半预答辩，你有时间吧？" -> "title": "两个博士预答辩", "location": ""
+   - Input: "孙卓，我有两个博士计划下周二上午八点半在科技楼302预答辩，你有时间吧？" -> "title": "两个博士预答辩", "location": "科技楼302"
+   - Input: "张老师，我们打算明天下午3点在315会议室开项目周会，方便吗？" -> "title": "项目周会", "location": "315会议室"
+   - Input: "下周三上午10点腾讯会议：123-456-789 开团队周会 预计1.5小时" -> "title": "团队周会", "location": "腾讯会议 123-456-789", "url": "https://meeting.tencent.com/dm/123456789"
+8. Output MUST be strictly valid JSON without any markdown code fence blocks or extra explanation.`;
 
     const messages = [
       { role: 'system', content: systemPrompt },

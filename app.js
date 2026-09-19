@@ -842,6 +842,7 @@ function handleIncomingShare() {
   if (combined) {
     scheduleInput.value = combined;
     updatePreview();
+    showToast('已接收分享文本，正在解析日程...', 'info');
     // Process and auto-download
     setTimeout(() => {
       processAndGenerate(combined, true, true);
@@ -854,8 +855,6 @@ function handleIncomingShare() {
     } catch (e) {
       // Ignore if in restricted environment
     }
-
-    showToast('已接收分享文本并开始解析日程！', 'success');
   }
 }
 
@@ -918,15 +917,16 @@ function setupNativePlatform() {
 
       scheduleInput.value = text;
       updatePreview();
-      processAndGenerate(text, true, true);
 
       if (source === 'zip') {
-        showToast(`已从压缩包 [${fileName || 'ZIP'}] 中提取文本并开始解析日程！`, 'success');
+        showToast(`已从压缩包 [${fileName || 'ZIP'}] 中提取文本，正在解析日程...`, 'info');
       } else if (source === 'file') {
-        showToast(`已从文件 [${fileName || '文件'}] 中读取文本并开始解析日程！`, 'success');
+        showToast(`已从文件 [${fileName || '文件'}] 中读取文本，正在解析日程...`, 'info');
       } else {
-        showToast('已接收系统分享文本并开始解析日程！', 'success');
+        showToast('已接收系统分享文本，正在解析日程...', 'info');
       }
+
+      processAndGenerate(text, true, true);
     }
 
     // Native text/file/zip share intent listener
