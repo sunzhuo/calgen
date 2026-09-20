@@ -3,6 +3,7 @@
 一个基于原生 Web 技术构建的单网页日程生成应用，接入 Cloudflare Workers AI **`@cf/google/gemma-4-26b-a4b-it`** 大模型进行深度自然语言日程语义解析，同时支持本地规则快速回退、自动生成并下载标准 `.ics` (iCalendar) 日历文件、日程自动存储与过期清理，并已完整配置 PWA（支持安装至桌面/主屏幕及直接接收系统分享文本）。
 
 提供打包好的APK安装程序，在手机上可以接收微信等APP分享的文字信息自动处理成日历日程格式保存到系统中。
+微信中选中文字->转发->转到其他应用->日程生成
 
 <img width="400" height="989" alt="image" src="https://github.com/user-attachments/assets/88030d52-6499-43a6-acec-a95f82ccc1dc" />
 ---
