@@ -4,6 +4,7 @@
 
 提供打包好的APK安装程序，在手机上可以接收微信等APP分享的文字信息自动处理成日历日程格式保存到系统中。
 
+<img width="400" height="989" alt="image" src="https://github.com/user-attachments/assets/88030d52-6499-43a6-acec-a95f82ccc1dc" />
 ---
 
 ## 🌟 功能特性
