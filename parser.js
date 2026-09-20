@@ -72,12 +72,36 @@ export function cleanEventTitle(rawTitle) {
   // 1. Strip bracket emojis (e.g. [握手], [OK], [强], [玫瑰], [微笑])
   t = t.replace(/\[[\u4e00-\u9fa5a-zA-Z0-9_\-]+\]/g, '');
 
-  // 2. Strip salutations and greetings from the start
+  // 1.5 Strip meeting agenda/content details from the tail
+  // e.g., 交流核心包括：..., 主要内容包括..., 会议议程如下...
+  t = t.replace(/(?:交流核心|主要内容|会议内容|研讨内容|会议议程|主要议程|议程包括|交流要点)[：:\s\S]*$/i, '');
+
+  // 2. Strip standalone vocatives at the start (such as "各位负责人，", "各位老师：", "@所有人 ")
+  // even when there is no "好" after the vocative
+  t = t.replace(
+    /^(?:各位(?:负责人|老师|领导|同事|同学|朋友|专家|会员|同仁|代表|家长|评审|评委|学长|学姐|新生|教授|大家)|老师们|领导们|同事们|同学们|大家|所有人|@所有人)\s*[，,：:\s]\s*/i,
+    ''
+  );
+
+  // 2.5 Strip salutations and greetings from the start
   // e.g., 各位老师下午好, 各位领导好, 老师们好, 大家好, 亲爱的同事们, Hi all, Good morning, etc.
-  t = t.replace(/^(?:(?:各位(?:老师|领导|同事|同学|朋友|专家|会员|同仁|代表|家长|评审|评委|学长|学姐|新生|教授)?|大家|老师们|领导们|同事们|同学们)?(?:下午好|上午好|早上好|中午好|晚上好|好|您好|你好)|亲爱的.+?[好！!，,\s]|(?:Good\s+(?:morning|afternoon|evening)|Hi|Hello|Dear)\s+[^,，!！]+[,，!！]?)+[\s,，:：\-]*/i, '');
+  t = t.replace(/^(?:(?:各位(?:老师|领导|同事|同学|朋友|专家|会员|同仁|代表|家长|评审|评委|学长|学姐|新生|教授|负责人)?|大家|老师们|领导们|同事们|同学们)?(?:下午好|上午好|早上好|中午好|晚上好|好|您好|你好)|亲爱的.+?[好！!，,\s]|(?:Good\s+(?:morning|afternoon|evening)|Hi|Hello|Dear)\s+[^,，!！]+[,，!！]?)+[\s,，:：\-]*/i, '');
 
   // 3. Strip recipient vocatives at the beginning (e.g. "孙卓，", "张老师：", "@所有人 ", "@李工: ")
   t = t.replace(/^(?:[A-Za-z\u4e00-\u9fa5]{2,5}|@\S+)[，,：:\s]+(?=(?:我|咱|请|有|下周|明天|后天|今天|关于|原定|现|麻烦|想|由于|因|各位))/i, '');
+
+  // 3.5 Semantic pattern normalization:
+  // e.g. "图书馆馆长带队到交通学院做一线调研" -> "图书馆馆长来调研"
+  const surveyMatch = t.match(
+    /(?:^|[，,。；;\s])([\u4e00-\u9fa5A-Za-z0-9]{2,10}?)(?:带队)?(?:到|来|赴|深入)[^，,。；;\n]{0,15}?(?:做|开展|进行|组织)?(?:一线|专题|专项|深入)?[^，,。；;\n]{0,6}(调研|走访|考察|交流|座谈|研讨|巡查|指导|督导|检查)/
+  );
+  if (surveyMatch) {
+    const subject = surveyMatch[1];
+    const action = surveyMatch[2];
+    t = (action === '调研' || action === '走访' || action === '考察' || action === '指导')
+      ? `${subject}来${action}`
+      : `${subject}${action}`;
+  }
 
   // 4. Strip notification / announcement prefixes
   // e.g., 关于召开..., 关于举办..., 会议通知:, 通知:, 日程安排:
@@ -278,8 +302,8 @@ export function parseTimeFromText(str, targetDate) {
     isAM = true;
   }
 
-  // Check time ranges like "14:00-16:30" or "下午2点到4点半" or "9:00 ~ 11:30"
-  const rangeMatch = trimmed.match(/(\d{1,2})[:：](\d{2})\s*(?:-|~|至|到)\s*(\d{1,2})[:：](\d{2})/) ||
+  // Check time ranges like "14:00-16:30" or "8:30分-10:00" or "下午2点到4点半" or "9:00 ~ 11:30"
+  const rangeMatch = trimmed.match(/(\d{1,2})[:：](\d{2})(?:分)?\s*(?:-|~|至|到)\s*(\d{1,2})[:：](\d{2})(?:分)?/) ||
     trimmed.match(/(?:(?:上午|下午|晚上|中午|凌晨)?\s*(\d{1,2}|[一二两三四五六七八九十]+)\s*点(?:(\d{1,2}|半|一刻|三刻)分?)?)\s*(?:-|~|至|到)\s*(?:(?:上午|下午|晚上|中午|凌晨)?\s*(\d{1,2}|[一二两三四五六七八九十]+)\s*点(?:(\d{1,2}|半|一刻|三刻)分?)?)/);
 
   if (rangeMatch) {
@@ -317,9 +341,9 @@ export function parseTimeFromText(str, targetDate) {
     }
   }
 
-  // Single time match: "14:30" or "下午3点半" or "10点" or "3pm"
+  // Single time match: "14:30" or "8:30分" or "下午3点半" or "10点" or "3pm"
   if (startHours === null) {
-    const timeMatch = trimmed.match(/(?:^|[^\d])(\d{1,2})[:：](\d{2})(?:[:：](\d{2}))?(?:\s*(am|pm))?/i);
+    const timeMatch = trimmed.match(/(?:^|[^\d])(\d{1,2})[:：](\d{2})(?:[:：](\d{2}))?(?:分)?(?:\s*(am|pm))?/i);
     if (timeMatch) {
       startHours = parseInt(timeMatch[1], 10);
       startMinutes = parseInt(timeMatch[2], 10);
@@ -615,11 +639,12 @@ export function parseScheduleText(text, referenceDate = new Date()) {
   // Location extraction
   let location = '';
 
-  // 1. Explicit location label: 地点：..., 地点在..., 位置在..., 会议室：...
-  const explicitLocMatch = trimmed.match(/(?:(?:开会|活动|面试|答辩|预答辩|培训|会商|集合)?地点|位置|地址|会议室|场所)(?:[：:\s]+|(?:[在为设于]+[\s：:]*))([^\n,，;；]+)/i);
+  // 1. Explicit location label: 地点：..., 地点在..., 地点管理楼A515, 位置在..., 会议室：...
+  const explicitLocMatch = trimmed.match(/(?:(?:开会|活动|面试|答辩|预答辩|培训|会商|集合)?地点|位置|地址|会议室|场所)\s*(?:[：:]|在|为|设于)?\s*([^\n,，。.;；]+)/i);
   if (explicitLocMatch) {
     let cand = explicitLocMatch[1].trim();
-    cand = cand.replace(/[，,、\s]*(?:你有时间|你有空|方便|你能来|可以吗|行不行|预答辩|答辩|开会).*$/i, '').trim();
+    cand = cand.replace(/[，,、\s]*(?:你有时间|你有空|方便|你能来|可以吗|行不行|预答辩|答辩|开会|交流核心|主要内容|会议内容).*$/i, '').trim();
+    cand = cand.replace(/[，,。.;；:：!！]+$/, '').trim();
     if (cand && !/^(今天|明天|后天|昨天|周|星期|上午|下午|晚上|\d+)/.test(cand)) {
       location = cand;
     }
@@ -648,7 +673,19 @@ export function parseScheduleText(text, referenceDate = new Date()) {
     }
   }
 
-  // 4. Physical venue keywords: e.g. 科技楼302, 主楼报告厅, 315会议室
+  // 4. Generic building + room number pattern: e.g. 管理楼A515, 管理楼A515室, 科技楼302
+  if (!location) {
+    const buildingRoomMatch = trimmed.match(/(?:在\s*)?([\u4e00-\u9fa5A-Za-z]{2,12}(?:楼|馆|中心|大厦|校区|学院|院系)\s*[A-Za-z]?\d{2,4}(?:室)?)/i);
+    if (buildingRoomMatch) {
+      let candidate = buildingRoomMatch[1].trim();
+      candidate = candidate.replace(/^(?:在|地点在|地点为)\s*/, '');
+      if (!/^(今天|明天|后天|昨天|周|星期|上午|下午|晚上|\d+)/.test(candidate)) {
+        location = candidate;
+      }
+    }
+  }
+
+  // 5. Physical venue keywords: e.g. 科技楼302, 主楼报告厅, 315会议室
   if (!location) {
     const venueMatch = trimmed.match(/(?:在\s*)?([A-Za-z0-9#\-_]{1,10}?(?:会议室|报告厅|研讨室|研讨厅|办公室|教室|实验室|大厦|大楼|学院楼|教学楼|综合楼|科技楼|主楼|南楼|北楼|东楼|西楼|\d+层|\d+楼|\d{3,4}室|[A-Z]\d{2,4}|操场|体育馆|食堂)|[一-龥]{2,8}(?:会议室|报告厅|研讨室|研讨厅|办公室|教室|实验室|大厦|大楼|学院楼|教学楼|综合楼|科技楼|主楼|南楼|北楼|东楼|西楼|操场|体育馆|食堂)(?:\s*\d{3,4}室?)?)/);
     if (venueMatch) {
@@ -715,7 +752,8 @@ export function parseScheduleText(text, referenceDate = new Date()) {
     cleaned = cleaned.replace(/https?:\/\/[^\s]+/g, '');
     cleaned = cleaned.replace(/腾讯会议[：:\s]*\d{3}[-\s]?\d{3}[-\s]?\d{3,4}/gi, '');
     cleaned = cleaned.replace(/Zoom[：:\s]*\d{3}[-\s]?\d{3}[-\s]?\d{3,4}/gi, '');
-    cleaned = cleaned.replace(/(?:(?:开会|活动|面试|答辩|预答辩|培训|会商|集合)?地点|位置|地址|会议室|场所)(?:[：:\s]+|(?:[在为设于]+[\s：:]*))[^\n,，;；]+/gi, '');
+    cleaned = cleaned.replace(/(?:(?:开会|活动|面试|答辩|预答辩|培训|会商|集合)?地点|位置|地址|会议室|场所)\s*(?:[：:]|在|为|设于)?\s*[^\n,，。.;；]+/gi, '');
+    cleaned = cleaned.replace(/(?:开会|会议|活动|日程)?时间\s*(?:定在|在|为|设在|设于)?[：:\s]*/gi, '');
 
     if (location) {
       const escapedLoc = location.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -729,14 +767,15 @@ export function parseScheduleText(text, referenceDate = new Date()) {
     cleaned = cleaned.replace(/(\d+|[一二两三四五六七八九十]+)天[之以]?后/g, '');
     cleaned = cleaned.replace(/\d{4}[\.\/\-年]\d{1,2}[\.\/\-月]\d{1,2}[日号]?/g, '');
     cleaned = cleaned.replace(/\d{1,2}月\d{1,2}[日号]?/g, '');
-    cleaned = cleaned.replace(/(\d{1,2})[:：](\d{2})\s*(?:-|~|至|到)\s*(\d{1,2})[:：](\d{2})/g, '');
-    cleaned = cleaned.replace(/(\d{1,2})[:：](\d{2})(?:[:：](\d{2}))?\s*(?:am|pm)?/gi, '');
+    cleaned = cleaned.replace(/(\d{1,2})[:：](\d{2})(?:分)?\s*(?:-|~|至|到)\s*(\d{1,2})[:：](\d{2})(?:分)?/g, '');
+    cleaned = cleaned.replace(/(\d{1,2})[:：](\d{2})(?:[:：](\d{2}))?(?:分)?\s*(?:am|pm)?/gi, '');
     cleaned = cleaned.replace(/(?:上午|下午|晚上|中午|凌晨)?\s*(?:\d{1,2}|[一二两三四五六七八九十]+)\s*点(?:(?:\d{1,2}|半|一刻|三刻)分?)?/g, '');
     cleaned = cleaned.replace(/\b(?:at\s+)?\d{1,2}(?::\d{2})?\s*(?:am|pm)\b/gi, '');
     cleaned = cleaned.replace(/(?:早上|清晨|早晨|上午|中午|下午|傍晚|晚上|夜里|半夜|凌晨)/g, '');
     cleaned = cleaned.replace(/(?:持续|时长|大概|预计)?(?:\d+(?:\.\d+)?|[一二两三四五半]+)\s*(?:个)?(?:小时|分钟|hr|hrs|min|mins)/gi, '');
     cleaned = cleaned.replace(/(?:全天|整天|\ball[\s\-]day\b)/gi, '');
     cleaned = cleaned.replace(/(?:提醒我|备忘|安排|请参加|请大家|准时|参加)/g, '');
+    cleaned = cleaned.replace(/(?:交流核心|主要内容|会议内容|研讨内容|会议议程|主要议程|议程包括|交流要点)[：:\s\S]*$/gi, '');
     cleaned = cleaned.replace(/^[\s,，.。;；:：!！\-—~～]+/g, '').replace(/[\s,，.。;；:：!！\-—~～]+$/g, '');
 
     const candidateLines = cleaned.split(/\r?\n/)
@@ -848,13 +887,14 @@ Extract the schedule event from the user's text and respond ONLY with a valid JS
 Rules:
 1. Title Rules (标题规则):
    - 长度严格限制在 12 个字以内（<= 12 characters）。
-   - 尽量使用名词或名词短语（如 "赵帅奇博士预答辩", "两个博士预答辩", "项目周会", "团队周会", "财务审计沟通会"）。
+   - 尽量使用名词或名词短语（如 "赵帅奇博士预答辩", "两个博士预答辩", "项目周会", "团队周会", "财务审计沟通会", "图书馆馆长来调研"）。
    - 绝对不带任何标点符号（禁止包含逗号、句号、冒号、感叹号、顿号、问号、引号、括号等任何标点）。
-   - 彻底剔除开头的打招呼与问候语（如“各位老师下午好，”、“大家下午好，”、“各位领导好，”、“老师们好，”、“下午好，”、“@所有人”等，绝不能作为标题的一部分！）。
+   - 彻底剔除开头的打招呼与问候语及通知对象称呼（如“各位负责人，”、“各位老师下午好，”、“大家下午好，”、“各位领导好，”、“老师们好，”、“下午好，”、“@所有人”等，绝不能作为标题的一部分！）。
    - 彻底剔除事务性与通知套话（如“...安排如下”、“...日程如下”、“...通知如下”、“...的通知”、“关于召开...”等）。例如输入“各位老师下午好，赵帅奇博士预答辩安排如下：”，标题必须提取为“赵帅奇博士预答辩”，绝对不要输出“各位老师下午好，赵帅奇博士预答辩”。
+   - 对于“X带队到Y做一线调研/座谈/走访”这类句式，标题应精炼规范提取为“X来调研”或“X调研/座谈”（如“图书馆馆长来调研”），绝不要保留“带队到Y做一线”等冗余叙述。
    - 彻底剔除主观意图动词与句末疑问（如“我有...”、“我们计划...”、“打算...”、“你有时间吧？”、“方便吗？”、“收到请回复”、“谢谢[握手]”等）。若包含参与人数量，合入名词短语（如“我有两个博士计划预答辩” -> “两个博士预答辩”）。
    - 彻底剔除改期原因与连词（如“由于有老师...有课”、“因此时间改为”），标题仅保留核心事件名词。
-   - 标题中不得包含日期、时间、地点或表情符号。
+   - 标题中不得包含日期、时间、地点、议程细节（如“交流核心包括...”）或表情符号。
 
 2. Date Parsing & Cross-Verification Rules (日期解析与双重核对规则):
    - 具体日期优先（Explicit Date Priority）：文本中如果出现具体明确的月日（如“9月24日”、“2026-09-24”、“9/24”、“10月5号”等），必须以该明确日期为绝对基准！年份根据 Current Reference Time (${yyyy}) 推算。
@@ -865,7 +905,8 @@ Rules:
    - 仅相对日期时的计算：仅当文本中完全没有具体月日（仅有“下周四”、“明天下午”、“后天”等）时，才严格基于 Current Reference Time 进行相对计算（中文周一为一周起始，下周四指下个周一至周日周期内的周四）。
 
 3. Location Rules:
-   - 提取具体物理地点或会议室（如“管理楼A515会议室”、“科技楼302”、“315会议室”）。
+   - 提取具体物理地点或会议室（如“管理楼A515”、“管理楼A515会议室”、“科技楼302”、“315会议室”）。
+   - “地点管理楼A515”与“地点：管理楼A515”含义完全相同，即使没有冒号或空格也必须准确提取地点为“管理楼A515”。
    - 地点中严禁包含动词或事件名称（如“在管理楼A515预答辩” -> location 应为“管理楼A515”，不能包含“预答辩”）。
    - 若为线上会议（腾讯会议/Zoom）且无实体地点，填写“腾讯会议 123-456-789”或“Zoom 123-456-789”。
 
@@ -882,12 +923,16 @@ Rules:
 
 5. Time & Duration Rules:
    - 格式为 ISO 8601 本地时间 YYYY-MM-DDTHH:mm:ss。
+   - “8:30分-10:00”中的“分”属于分钟单位，准确解析为开始时间 08:30:00，结束时间 10:00:00，严禁退化为默认 1 小时。
    - 未指定结束时间时：若提到时长（如预计1.5小时），则加上时长；若未提时长且非全天，默认结束时间为开始时间后1小时；全天日程开始与结束日期相同且时间为 00:00:00。
 
 6. Meeting URL:
    - 腾讯会议号（如 123-456-789）自动转换为 https://meeting.tencent.com/dm/123456789 填入 url 字段。
 
 7. Few-Shot Examples (少样本示例):
+   - Input: "各位负责人，图书馆馆长带队到交通学院做一线调研，时间定在9月21日上午8:30分-10:00；地点管理楼A515。交流核心包括：一、图书馆老师简单介绍现有资源和服务。"
+     -> "title": "图书馆馆长来调研", "startTime": "${yyyy}-09-21T08:30:00", "endTime": "${yyyy}-09-21T10:00:00", "location": "管理楼A515", "url": "", "allDay": false
+     (解析要点：剔除“各位负责人”称呼；提取规范事件标题“图书馆馆长来调研”；准确提取无冒号地点“管理楼A515”；“8:30分-10:00”准确解析为08:30至10:00而非默认1小时)
    - Input: "各位老师下午好，赵帅奇博士预答辩安排如下：\n时间：9月24日（下周四）下午2:30\n地点：管理楼A515会议室\n请各位老师预留时间参加，谢谢[握手]"
      -> "title": "赵帅奇博士预答辩", "startTime": "${yyyy}-09-24T14:30:00", "endTime": "${yyyy}-09-24T15:30:00", "location": "管理楼A515会议室", "url": "", "allDay": false
      (解析要点：标题严格在12字以内且无标点；剔除“各位老师下午好”；双重核对9月24日与下周四，准确解析为09-24而非10-01)
@@ -993,15 +1038,47 @@ export function buildEventFromAiData(d, text, referenceDate = new Date()) {
     }
   }
 
+  // Deterministic hybrid reconciliation using local parser
+  let finalLocation = d.location || '';
+  let finalUrl = d.url || '';
+
+  if (text && typeof text === 'string') {
+    const localParsed = parseScheduleText(text, referenceDate);
+    if (localParsed) {
+      // 1. Supplement location if AI returned empty or whitespace but local parser identified location
+      if ((!finalLocation || !finalLocation.trim()) && localParsed.location) {
+        finalLocation = localParsed.location;
+      }
+
+      // 2. Correct endTime if AI defaulted to 1 hour (e.g. 08:30-09:30) while local parser found an explicit range (e.g. 08:30-10:00)
+      if (!d.allDay && localParsed.startTime && localParsed.endTime) {
+        const localStart = new Date(localParsed.startTime);
+        const localEnd = new Date(localParsed.endTime);
+        const localDuration = localEnd.getTime() - localStart.getTime();
+        const aiDuration = endDate.getTime() - startDate.getTime();
+
+        // If local parser detected a non-default duration from explicit text range/duration, and AI ended up with 1 hour default
+        if (localDuration !== 3600000 && (aiDuration === 3600000 || isNaN(endDate.getTime()))) {
+          endDate = new Date(startDate.getTime() + localDuration);
+        }
+      }
+
+      // 3. Supplement meeting URL if AI missed it
+      if ((!finalUrl || !finalUrl.trim()) && localParsed.url) {
+        finalUrl = localParsed.url;
+      }
+    }
+  }
+
   return {
     id: `event-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`,
     title: cleanEventTitle(d.title || '日程安排'),
     startTime: startDate.toISOString(),
     endTime: endDate.toISOString(),
     allDay: !!d.allDay,
-    location: d.location || '',
+    location: finalLocation || '',
     description: d.description || text.trim(),
-    url: d.url || '',
+    url: finalUrl || '',
     alarmMinutes: 15,
     createdAt: new Date().toISOString(),
     parserType: 'ai',

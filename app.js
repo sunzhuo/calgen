@@ -362,7 +362,7 @@ function escapeHtml(str = '') {
 /**
  * Render parsed event in the preview card
  */
-function displayInPreview(event, isAi = false, isPending = false) {
+function displayInPreview(event, isAi = false, isPending = false, isFallback = false) {
   if (!event) {
     previewCard.classList.remove('show');
     return;
@@ -434,13 +434,23 @@ function displayInPreview(event, isAi = false, isPending = false) {
   }
 
   if (previewEngineBadge) {
-    previewEngineBadge.textContent = isAi ? '🤖 AI' : '⚡ 本地解析';
-    previewEngineBadge.className = `engine-badge ${isAi ? 'ai' : 'local'}`;
+    if (isAi) {
+      previewEngineBadge.textContent = '🤖 AI';
+      previewEngineBadge.className = 'engine-badge ai';
+    } else if (isFallback) {
+      previewEngineBadge.textContent = '⚡ 本地 (AI回退)';
+      previewEngineBadge.className = 'engine-badge fallback';
+    } else {
+      previewEngineBadge.textContent = '⚡ 本地解析';
+      previewEngineBadge.className = 'engine-badge local';
+    }
   }
 
   if (previewStatus) {
     if (isPending) {
       previewStatus.innerHTML = '<span class="spinner"></span> 深度解析中...';
+    } else if (isFallback) {
+      previewStatus.textContent = 'AI 未响应，已切换为本地解析';
     } else {
       previewStatus.textContent = isAi ? 'AI 解析完成' : '准备就绪';
     }
@@ -697,8 +707,8 @@ function updatePreview() {
       }
       return aiEvent;
     }).catch((err) => {
-      if (scheduleInput.value.trim() === text && previewStatus) {
-        previewStatus.textContent = '本地解析就绪';
+      if (scheduleInput.value.trim() === text) {
+        displayInPreview(localParsed, false, false, true);
       }
       return null;
     });
@@ -795,6 +805,7 @@ async function processAndGenerate(text, triggerDownload = true, force = false) {
   }
 
   let event = null;
+  let fellBackToLocal = false;
   try {
     if (useAiEnabled) {
       // 1. If we already have resolved AI event for this text, reuse it
@@ -805,6 +816,7 @@ async function processAndGenerate(text, triggerDownload = true, force = false) {
         event = await currentAiPromise;
         if (isPausedByUser || !event) {
           event = parseScheduleText(targetText);
+          if (!isPausedByUser) fellBackToLocal = true;
         }
       } else {
         event = await parseScheduleTextAsync(targetText, {
@@ -814,8 +826,9 @@ async function processAndGenerate(text, triggerDownload = true, force = false) {
           useAi: true,
           signal: activeAiAbortController ? activeAiAbortController.signal : null
         });
-        if (isPausedByUser || !event) {
-          event = parseScheduleText(targetText);
+        if (isPausedByUser || !event || event.parserType === 'local') {
+          if (!event) event = parseScheduleText(targetText);
+          if (!isPausedByUser) fellBackToLocal = true;
         }
       }
     } else {
@@ -824,10 +837,15 @@ async function processAndGenerate(text, triggerDownload = true, force = false) {
   } catch (err) {
     console.error('Parsing failed or paused:', err);
     event = parseScheduleText(targetText);
+    if (useAiEnabled && !isPausedByUser) fellBackToLocal = true;
   } finally {
     isServerAiParsing = false;
     activeAiAbortController = null;
     resetGenerateBtn();
+  }
+
+  if (fellBackToLocal && !isPausedByUser) {
+    showToast('AI 解析暂不可用，已自动采用本地规则解析', 'info');
   }
 
   if (!event) {
