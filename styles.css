@@ -132,7 +132,17 @@ body {
 
 .header-actions {
   display: flex;
+  align-items: center;
   gap: 8px;
+}
+
+.header-actions .btn {
+  height: 32px;
+}
+
+.header-icon-btn {
+  padding: 0;
+  flex-shrink: 0;
 }
 
 /* Card components */
