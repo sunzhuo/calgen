@@ -1,4 +1,4 @@
-const CACHE_NAME = 'calgen-v4';
+const CACHE_NAME = 'calgen-v5';
 const PRECACHE_ASSETS = [
   './',
   './index.html',
