@@ -20,6 +20,7 @@ import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
 import com.getcapacitor.annotation.Permission;
 import com.getcapacitor.annotation.PermissionCallback;
+import org.json.JSONObject;
 
 import java.text.SimpleDateFormat;
 import java.util.Date;
@@ -41,6 +42,39 @@ import java.util.TimeZone;
 public class NativeCalendarPlugin extends Plugin {
 
     private static final String TAG = "NativeCalendarPlugin";
+
+    @PluginMethod
+    public void getPendingSharePayload(PluginCall call) {
+        getBridge().execute(() -> {
+            try {
+                JSONObject payload = MainActivity.consumePendingSharedPayload(3500);
+                JSObject ret = new JSObject();
+                if (payload != null) {
+                    ret.put("hasData", true);
+                    ret.put("text", payload.optString("text", ""));
+                    ret.put("source", payload.optString("source", "text"));
+                    ret.put("fileName", payload.optString("fileName", ""));
+                    ret.put("entryCount", payload.optInt("entryCount", 1));
+                } else {
+                    ret.put("hasData", false);
+                }
+                call.resolve(ret);
+            } catch (Exception e) {
+                JSObject ret = new JSObject();
+                ret.put("hasData", false);
+                ret.put("error", e.getMessage());
+                call.resolve(ret);
+            }
+        });
+    }
+
+    @PluginMethod
+    public void clearPendingSharePayload(PluginCall call) {
+        MainActivity.consumePendingSharedPayload(0);
+        JSObject ret = new JSObject();
+        ret.put("success", true);
+        call.resolve(ret);
+    }
 
     @PluginMethod
     public void checkCalendarPermission(PluginCall call) {

@@ -113,7 +113,7 @@ async function testNativeDirectCalendarFlow() {
     endTime: '2026-09-26T11:30:00',
     location: '科技楼302',
     url: 'https://meeting.tencent.com/dm/789012',
-    description: '孙卓博士预答辩汇报'
+    description: '博士预答辩汇报'
   };
 
   const res = await openCalendarEvent(testEvent);

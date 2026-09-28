@@ -9,6 +9,7 @@
     "preview": "vite preview",
     "cap:sync": "npx cap sync",
     "cap:build": "npm run build && npx cap sync",
+    "apk:build": "node scripts/build-apk.mjs",
     "postinstall": "node scripts/patch-plugin.mjs"
   },
   "dependencies": {

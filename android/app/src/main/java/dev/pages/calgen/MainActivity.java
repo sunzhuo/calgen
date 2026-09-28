@@ -1,5 +1,6 @@
 package dev.pages.calgen;
 
+import android.content.ClipData;
 import android.content.ContentResolver;
 import android.content.Intent;
 import android.database.Cursor;
@@ -21,8 +22,10 @@ import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 
@@ -30,6 +33,10 @@ public class MainActivity extends BridgeActivity {
 
     private static final String TAG = "CalGenMainActivity";
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
+
+    private static final Object SHARE_LOCK = new Object();
+    private static volatile JSONObject pendingSharedPayload = null;
+    private static volatile CompletableFuture<JSONObject> pendingShareFuture = null;
 
     // Known text/calendar extensions to prioritize inside archives
     private static final Set<String> TEXT_EXTENSIONS = new HashSet<>(Arrays.asList(
@@ -52,7 +59,35 @@ public class MainActivity extends BridgeActivity {
     @Override
     protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
+        setIntent(intent);
         handleIncomingIntent(intent);
+    }
+
+    public static JSONObject consumePendingSharedPayload(long timeoutMs) {
+        CompletableFuture<JSONObject> future;
+        synchronized (SHARE_LOCK) {
+            future = pendingShareFuture;
+        }
+
+        if (future != null) {
+            try {
+                JSONObject res = future.get(timeoutMs, TimeUnit.MILLISECONDS);
+                synchronized (SHARE_LOCK) {
+                    pendingSharedPayload = null;
+                    pendingShareFuture = null;
+                }
+                return res;
+            } catch (Exception e) {
+                Log.w(TAG, "Timeout or error waiting for pending share future: " + e.getMessage());
+            }
+        }
+
+        synchronized (SHARE_LOCK) {
+            JSONObject res = pendingSharedPayload;
+            pendingSharedPayload = null;
+            pendingShareFuture = null;
+            return res;
+        }
     }
 
     private void handleIncomingIntent(Intent intent) {
@@ -61,6 +96,10 @@ public class MainActivity extends BridgeActivity {
         if (action == null) return;
 
         if (Intent.ACTION_SEND.equals(action) || Intent.ACTION_VIEW.equals(action) || Intent.ACTION_SEND_MULTIPLE.equals(action)) {
+            Log.d(TAG, "Incoming share intent detected: " + action);
+            synchronized (SHARE_LOCK) {
+                pendingShareFuture = new CompletableFuture<>();
+            }
             executor.execute(() -> processIntentInBackground(intent));
         }
     }
@@ -71,10 +110,11 @@ public class MainActivity extends BridgeActivity {
 
             // 1. Direct text sharing (e.g. highlighted text in another app)
             String extraText = intent.getStringExtra(Intent.EXTRA_TEXT);
+            Uri directStream = intent.getParcelableExtra(Intent.EXTRA_STREAM);
+            ClipData directClip = intent.getClipData();
             if (extraText != null && !extraText.trim().isEmpty() && !Intent.ACTION_VIEW.equals(action)) {
-                // If it's a plain text share without any stream, dispatch directly
-                Uri stream = intent.getParcelableExtra(Intent.EXTRA_STREAM);
-                if (stream == null) {
+                // If it's a plain text share without any stream or clip, dispatch directly
+                if (directStream == null && directClip == null) {
                     dispatchSharedPayload(extraText.trim(), "text", null, 1);
                     return;
                 }
@@ -99,6 +139,32 @@ public class MainActivity extends BridgeActivity {
                 }
             }
 
+            // Fallback 1: Check ClipData (common in WeChat file forwarding and modern Android shares)
+            if (uris.isEmpty() && intent.getClipData() != null) {
+                ClipData clipData = intent.getClipData();
+                for (int i = 0; i < clipData.getItemCount(); i++) {
+                    ClipData.Item item = clipData.getItemAt(i);
+                    if (item != null && item.getUri() != null) {
+                        uris.add(item.getUri());
+                    }
+                }
+            }
+
+            // Fallback 2: Check intent.getData() if present on ACTION_SEND
+            if (uris.isEmpty() && intent.getData() != null) {
+                uris.add(intent.getData());
+            }
+
+            // Fallback 3: Check EXTRA_STREAM as ArrayList even for ACTION_SEND
+            if (uris.isEmpty()) {
+                try {
+                    ArrayList<Uri> extraUris = intent.getParcelableArrayListExtra(Intent.EXTRA_STREAM);
+                    if (extraUris != null && !extraUris.isEmpty()) {
+                        uris.addAll(extraUris);
+                    }
+                } catch (Exception ignored) {}
+            }
+
             if (uris.isEmpty() && extraText != null && !extraText.trim().isEmpty()) {
                 dispatchSharedPayload(extraText.trim(), "text", null, 1);
                 return;
@@ -109,6 +175,12 @@ public class MainActivity extends BridgeActivity {
             }
         } catch (Exception e) {
             Log.e(TAG, "Error processing incoming share intent", e);
+        } finally {
+            synchronized (SHARE_LOCK) {
+                if (pendingShareFuture != null && !pendingShareFuture.isDone()) {
+                    pendingShareFuture.complete(null);
+                }
+            }
         }
     }
 
@@ -282,6 +354,13 @@ public class MainActivity extends BridgeActivity {
     }
 
     private boolean isLikelyText(byte[] data) {
+        if (data == null || data.length == 0) return false;
+        // Check for UTF-16 BOM
+        if (data.length >= 2) {
+            if ((data[0] == (byte) 0xFE && data[1] == (byte) 0xFF) || (data[0] == (byte) 0xFF && data[1] == (byte) 0xFE)) {
+                return true;
+            }
+        }
         int checkLen = Math.min(data.length, 1024);
         int nullCount = 0;
         for (int i = 0; i < checkLen; i++) {
@@ -291,6 +370,14 @@ public class MainActivity extends BridgeActivity {
     }
 
     private String decodeString(byte[] data, Charset defaultCharset) {
+        if (data == null || data.length == 0) return "";
+        if (data.length >= 2) {
+            if (data[0] == (byte) 0xFE && data[1] == (byte) 0xFF) {
+                return new String(data, 2, data.length - 2, StandardCharsets.UTF_16BE);
+            } else if (data[0] == (byte) 0xFF && data[1] == (byte) 0xFE) {
+                return new String(data, 2, data.length - 2, StandardCharsets.UTF_16LE);
+            }
+        }
         try {
             return new String(data, defaultCharset);
         } catch (Exception ignored) {
@@ -328,6 +415,13 @@ public class MainActivity extends BridgeActivity {
             obj.put("fileName", fileName != null ? fileName : "");
             obj.put("entryCount", entryCount);
 
+            synchronized (SHARE_LOCK) {
+                pendingSharedPayload = obj;
+                if (pendingShareFuture != null && !pendingShareFuture.isDone()) {
+                    pendingShareFuture.complete(obj);
+                }
+            }
+
             String payloadJson = obj.toString();
             String js = "window.__CALGEN_SHARED_PAYLOAD__ = " + payloadJson + "; " +
                         "window.__CALGEN_SHARED_TEXT__ = " + JSONObject.quote(text) + "; " +
@@ -336,22 +430,31 @@ public class MainActivity extends BridgeActivity {
             dispatchJsToWebView(js);
         } catch (Exception e) {
             Log.e(TAG, "Error formatting shared payload JSON", e);
+            synchronized (SHARE_LOCK) {
+                if (pendingShareFuture != null && !pendingShareFuture.isDone()) {
+                    pendingShareFuture.complete(null);
+                }
+            }
         }
     }
 
     private void dispatchJsToWebView(String js) {
         runOnUiThread(() -> {
-            if (getBridge() != null && getBridge().getWebView() != null) {
-                WebView webView = getBridge().getWebView();
-                webView.evaluateJavascript(js, null);
-            } else {
-                new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(() -> {
-                    if (getBridge() != null && getBridge().getWebView() != null) {
-                        WebView webView = getBridge().getWebView();
-                        webView.evaluateJavascript(js, null);
-                    }
-                }, 600);
-            }
+            executeJsInWebView(js);
+            // In case the WebView was in the middle of navigating / cold-starting,
+            // retry injecting after a short delay as an extra safety measure.
+            new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(() -> executeJsInWebView(js), 800);
+            new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(() -> executeJsInWebView(js), 1800);
         });
+    }
+
+    private void executeJsInWebView(String js) {
+        try {
+            if (getBridge() != null && getBridge().getWebView() != null) {
+                getBridge().getWebView().evaluateJavascript(js, null);
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "Failed evaluating javascript in webview: " + e.getMessage());
+        }
     }
 }

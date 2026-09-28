@@ -1,5 +1,5 @@
 import { parseScheduleText, parseScheduleTextAsync, parseScheduleWithAI, testAiConnection, isEventOutdated, findMatchingSchedule } from './parser.js';
-import { buildICS, downloadICS, openCalendarEvent, isNativeApp, getSafeICSFilename } from './ics.js';
+import { buildICS, downloadICS, openCalendarEvent, isNativeApp, getSafeICSFilename, getNativeCalendarPlugin } from './ics.js';
 
 const STORAGE_KEY = 'calgen_schedules_v1';
 const AUTO_DOWNLOAD_KEY = 'calgen_auto_download';
@@ -1391,6 +1391,9 @@ function setupNativePlatform() {
     // Update main action button text
     resetGenerateBtn();
 
+    let lastProcessedShareKey = '';
+    let lastProcessedShareTime = 0;
+
     function applyIncomingSharedData(payload) {
       if (!payload) return;
       let text = '';
@@ -1407,6 +1410,14 @@ function setupNativePlatform() {
 
       if (!text) return;
 
+      const shareKey = (fileName || '') + '::' + text.length + '::' + text.slice(0, 100);
+      const now = Date.now();
+      if (shareKey === lastProcessedShareKey && (now - lastProcessedShareTime < 3000)) {
+        return; // Ignore duplicate delivery within 3 seconds
+      }
+      lastProcessedShareKey = shareKey;
+      lastProcessedShareTime = now;
+
       scheduleInput.value = text;
       updatePreview();
 
@@ -1421,21 +1432,52 @@ function setupNativePlatform() {
       processAndGenerate(text, true, true);
     }
 
-    // Native text/file/zip share intent listener
+    async function checkPendingNativeShare() {
+      const nativePlugin = getNativeCalendarPlugin();
+      if (nativePlugin && typeof nativePlugin.getPendingSharePayload === 'function') {
+        try {
+          const res = await nativePlugin.getPendingSharePayload();
+          if (res && res.hasData && res.text) {
+            applyIncomingSharedData(res);
+            return true;
+          }
+        } catch (e) {
+          console.warn('Querying pending native share payload failed:', e);
+        }
+      }
+      return false;
+    }
+
+    // Native text/file/zip share intent listener (triggered on warm start when app is already in memory)
     window.addEventListener('calgen:sharedText', (e) => {
       applyIncomingSharedData(e.detail);
     });
 
-    if (window.__CALGEN_SHARED_PAYLOAD__) {
-      const payload = window.__CALGEN_SHARED_PAYLOAD__;
-      window.__CALGEN_SHARED_PAYLOAD__ = null;
-      window.__CALGEN_SHARED_TEXT__ = null;
-      applyIncomingSharedData(payload);
-    } else if (window.__CALGEN_SHARED_TEXT__) {
-      const text = window.__CALGEN_SHARED_TEXT__;
-      window.__CALGEN_SHARED_TEXT__ = null;
-      applyIncomingSharedData(text);
-    }
+    // Query pending native payload immediately on cold start
+    checkPendingNativeShare().then((handled) => {
+      if (!handled) {
+        if (window.__CALGEN_SHARED_PAYLOAD__) {
+          const payload = window.__CALGEN_SHARED_PAYLOAD__;
+          window.__CALGEN_SHARED_PAYLOAD__ = null;
+          window.__CALGEN_SHARED_TEXT__ = null;
+          applyIncomingSharedData(payload);
+        } else if (window.__CALGEN_SHARED_TEXT__) {
+          const text = window.__CALGEN_SHARED_TEXT__;
+          window.__CALGEN_SHARED_TEXT__ = null;
+          applyIncomingSharedData(text);
+        }
+      }
+    });
+
+    // Safety net: check on app focus/visibilitychange in case intent arrived while transitioning
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') {
+        checkPendingNativeShare();
+      }
+    });
+    window.addEventListener('focus', () => {
+      checkPendingNativeShare();
+    });
   }
 }
 
