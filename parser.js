@@ -60,23 +60,80 @@ function getWeekdayDate(baseDate, targetDay, weekOffset = 0, explicitThisWeek = 
 }
 
 /**
- * Sanitize and clean event title to keep it concise, clear, and focused on the core subject.
- * Strips salutations, polite greetings, boilerplate announcement prefixes/suffixes, and emojis.
- * @param {string} rawTitle
+ * Extract glued event title appearing directly before "时间：" or "地点："
+ * e.g., "博士开题及中期时间：10月28日..." -> "博士开题及中期答辩" or "博士开题及中期"
+ * @param {string} text
  * @returns {string}
  */
-export function cleanEventTitle(rawTitle) {
+export function extractGluedEventTitle(text) {
+  if (!text || typeof text !== 'string') return '';
+  const trimmed = text.trim();
+
+  // Rule A: match specific event name glued to (具体|开始|结束|会议|活动)?(时间|地点)[:：]
+  const gluedMatch = trimmed.match(
+    /(?:^|[，。；！？、\s\n\r])([^\s，。；！？、：:\n\r]{2,20}?)(?:具体|开始|结束|会议|活动)?(?:时间|地点)\s*[:：]/
+  );
+  if (!gluedMatch) return '';
+
+  let candidate = gluedMatch[1].trim();
+
+  // Filter out pure generic words
+  const genericWords = /^(?:会议|活动|开始|结束|具体|通知|集合|开会|培训|日程|安排|召开|举行|举办|交流|座谈|调研|时间|地点)$/;
+  if (genericWords.test(candidate)) return '';
+
+  // Filter out pure greetings / vocatives if any glued
+  candidate = candidate.replace(/^(?:各位[^\s，,：:]{0,6}|大家好|老师们|同学们|所有人)/, '').trim();
+  if (candidate.length < 2) return '';
+
+  // Rule B: check if there is a self-introduction clause with an event type word
+  // e.g. "我是本次答辩的秘书安帅斌" -> eventType = "答辩"
+  const selfIntroMatch = trimmed.match(
+    /(?:^|[，。；！？、\s\n\r])(?:我是|本人是|这里是|俺是)(?:本次|这次|本场)?([^\s，。；！？、：:\n\r]{2,10}?)(?:的)?(?:秘书|负责人|联系人|主持人|组织者|助教|老师|同学|工作人员)/
+  );
+  const eventType = selfIntroMatch ? selfIntroMatch[1].trim() : '';
+
+  // Rule C: semantic merge
+  if (eventType && !candidate.endsWith(eventType)) {
+    if ((candidate + eventType).length <= 12) {
+      return `${candidate}${eventType}`;
+    }
+  }
+
+  if (candidate.length > 12) {
+    candidate = candidate.substring(0, 12).trim();
+  }
+  return candidate;
+}
+
+/**
+ * Sanitize and clean event title to keep it concise, clear, and focused on the core subject.
+ * Strips salutations, polite greetings, boilerplate announcement prefixes/suffixes, emojis,
+ * self-introduction phrases, and dangling particles.
+ * @param {string} rawTitle
+ * @param {string} [fullText]
+ * @returns {string}
+ */
+export function cleanEventTitle(rawTitle, fullText = '') {
   if (!rawTitle || typeof rawTitle !== 'string') return '日程安排';
   let t = rawTitle.trim();
 
-  // 1. Strip bracket emojis (e.g. [握手], [OK], [强], [玫瑰], [微笑])
-  t = t.replace(/\[[\u4e00-\u9fa5a-zA-Z0-9_\-]+\]/g, '');
+  // 1. Strip bracket emojis (e.g. [握手], [OK], [强], [玫瑰], [咖啡], [微笑])
+  t = t.replace(/\[[\u4e00-\u9fa5a-zA-Z0-9_\-]+\]/g, '').trim();
 
   // 1.5 Strip meeting agenda/content details from the tail
   // e.g., 交流核心包括：..., 主要内容包括..., 会议议程如下...
   t = t.replace(/(?:交流核心|主要内容|会议内容|研讨内容|会议议程|主要议程|议程包括|交流要点)[：:\s\S]*$/i, '');
 
-  // 2. Strip standalone vocatives at the start (such as "各位负责人，", "各位老师：", "@所有人 ")
+  // 2. Self-introduction extraction:
+  // e.g. "我是本次答辩的秘书安帅斌" -> "答辩"
+  const selfIntroMatch = t.match(
+    /^(?:我是|本人是|这里是|俺是)(?:本次|这次|本场)?(.+?)(?:的)?(?:秘书|负责人|联系人|主持人|组织者|助教|老师|同学|工作人员)(?:[\u4e00-\u9fa5]{0,6})?$/
+  );
+  if (selfIntroMatch && selfIntroMatch[1] && selfIntroMatch[1].trim()) {
+    t = selfIntroMatch[1].trim();
+  }
+
+  // 2.1 Strip standalone vocatives at the start (such as "各位负责人，", "各位老师：", "@所有人 ")
   // even when there is no "好" after the vocative
   t = t.replace(
     /^(?:各位(?:负责人|老师|领导|同事|同学|朋友|专家|会员|同仁|代表|家长|评审|评委|学长|学姐|新生|教授|大家)|老师们|领导们|同事们|同学们|大家|所有人|@所有人)\s*[，,：:\s]\s*/i,
@@ -103,9 +160,14 @@ export function cleanEventTitle(rawTitle) {
       : `${subject}${action}`;
   }
 
-  // 4. Strip notification / announcement prefixes
-  // e.g., 关于召开..., 关于举办..., 会议通知:, 通知:, 日程安排:
-  t = t.replace(/^(?:关于(?:举办|召开|组织|开展)?|通知[：:]|紧急通知[：:]|会议通知[：:]|日程安排[：:]|日程[：:]|安排[：:])/g, '');
+  // 4. Strip notification / announcement prefixes in a loop
+  // e.g., 关于召开..., 关于举办..., 会议通知:, 通知:, 日程安排:, 我是, 本人是, 这里是, 本次, 这次
+  const prefixPattern = /^(?:各位[^\s，,：:]{0,6}(?:上午好|下午好|晚上好|大家好|好)|(?:上午|下午|晚上)?好|我是|本人是|这里是|俺是|关于(?:举办|召开|组织|开展)?|通知|紧急通知|会议通知|日程安排|日程|安排|提醒|温馨提示|转发|本次|这次|本场)[\s，,：:]*|^(?:时间|地点|主题|事项|会议内容)\s*[:：]\s*/i;
+  let prev;
+  do {
+    prev = t;
+    t = t.replace(prefixPattern, '').trim();
+  } while (t !== prev);
 
   // 5. Strip first-person and conversational intent prefixes
   // e.g., "我有两个博士计划预答辩" -> "两个博士计划预答辩", "我们打算开项目周会" -> "开项目周会"
@@ -135,12 +197,38 @@ export function cleanEventTitle(rawTitle) {
   // Question tags / availability checks: 你有时间吧？, 方便吗？, 能来吗？, 可以吗？
   t = t.replace(/(?:[，,、\s]*(?:你?有(?:时间|空)(?:吗|吧|不|呀|呢)?|方便(?:吗|吧|不|呀|呢)?|你方便(?:吗|吧|不|呀|呢)?|你?能(?:来|参加)(?:吗|吧|不)?|能来(?:吗|吧|不)?|能参加(?:吗|吧|不)?|可以吗|可以吧|行不行|好不好|好吗|成吗|吗|吧|么)[\?？!！]*)+$/i, '');
 
+  // 9.5 Strip trailing person titles/roles, dangling particles, or time/location remnants in a loop
+  const suffixPattern = /(?:的(?:秘书|负责人|联系人|主持人|老师|同学|工作人员)?[\u4e00-\u9fa5]{0,4}|(?:具体|开始|会议|活动)?(?:时间|地点)|[的了呢吧啊呀及和与在：:，,。；;])+$/i;
+  do {
+    prev = t;
+    t = t.replace(suffixPattern, '').trim();
+  } while (t !== prev);
+
   // 10. Strip residual location remnants: e.g. "，地点，", "地点："
   t = t.replace(/^[，,、\s]*地点[：:\s,，]*/i, '');
   t = t.replace(/[，,、\s]*地点[：:\s,，]*$/i, '');
 
   // 11. Clean ALL punctuation marks from title (pure noun phrase, no punctuation)
   t = t.replace(/[，,。;；:：!！?？"“”'‘’、~～\-—·\(\)（）\[\]【】]/g, '').trim();
+
+  // 11.5 Fallback check: if cleaned title is too short (<= 2 chars) or empty, attempt salvage from fullText
+  if (t.length <= 2 && fullText && typeof fullText === 'string') {
+    const gluedMatch = fullText.match(
+      /(?:^|[，。；！？、\s\n\r])([^\s，。；！？、：:\n\r]{2,18}?)(?:时间|地点)\s*[:：]/
+    );
+    if (gluedMatch) {
+      const candidate = gluedMatch[1]
+        .replace(/^(?:会议|活动|开始|结束|具体|通知|集合|开会|培训|日程|安排)$/, '')
+        .trim();
+      if (candidate) {
+        if (t && !candidate.endsWith(t) && (candidate + t).length <= 12) {
+          t = `${candidate}${t}`;
+        } else {
+          t = candidate;
+        }
+      }
+    }
+  }
 
   // 12. Strictly limit title length to 12 characters
   if (t.length > 12) {
@@ -149,6 +237,8 @@ export function cleanEventTitle(rawTitle) {
 
   return t || '日程安排';
 }
+
+export const sanitizeTitle = cleanEventTitle;
 
 /**
  * /**
@@ -740,14 +830,20 @@ export function parseScheduleText(text, referenceDate = new Date()) {
   if (explicitTitleMatch) {
     explicitTitle = explicitTitleMatch[1].trim();
   }
+  if (!explicitTitle) {
+    const gluedTitle = extractGluedEventTitle(trimmed);
+    if (gluedTitle) {
+      explicitTitle = gluedTitle;
+    }
+  }
 
   const dateRes = parseDateFromText(trimmed, now);
   const matchedDate = dateRes && dateRes.date ? dateRes.date : new Date(now);
   const timeRes = parseTimeFromText(trimmed, matchedDate);
 
   // Title Extraction
-  let title = explicitTitle ? cleanEventTitle(explicitTitle) : '';
-  if (!title) {
+  let title = explicitTitle ? cleanEventTitle(explicitTitle, trimmed) : '';
+  if (!title || title === '日程安排') {
     let cleaned = trimmed;
     cleaned = cleaned.replace(/https?:\/\/[^\s]+/g, '');
     cleaned = cleaned.replace(/腾讯会议[：:\s]*\d{3}[-\s]?\d{3}[-\s]?\d{3,4}/gi, '');
@@ -778,16 +874,19 @@ export function parseScheduleText(text, referenceDate = new Date()) {
     cleaned = cleaned.replace(/(?:交流核心|主要内容|会议内容|研讨内容|会议议程|主要议程|议程包括|交流要点)[：:\s\S]*$/gi, '');
     cleaned = cleaned.replace(/^[\s,，.。;；:：!！\-—~～]+/g, '').replace(/[\s,，.。;；:：!！\-—~～]+$/g, '');
 
-    const candidateLines = cleaned.split(/\r?\n/)
-      .map(s => cleanEventTitle(s))
-      .filter(s => s && s !== '日程安排');
+    const rawClauses = cleaned.split(/[\r\n，。；;]+/).map(s => s.trim()).filter(Boolean);
+    const candidateLines = rawClauses
+      .filter(s => !/^(?:我是|本人是|这里是|俺是)/.test(s) && !/(?:的)?(?:秘书|负责人|联系人|主持人|组织者|助教|工作人员)$/.test(s))
+      .map(s => cleanEventTitle(s, trimmed))
+      .filter(s => s && s !== '日程安排' && !/^(?:我是|本人是|这里是|俺是)/.test(s) && !/(?:的|时间|地点)$/.test(s));
+
     title = candidateLines.length > 0 ? candidateLines[0] : '';
     if (!title || title.length < 2) {
       title = '日程安排';
     }
   }
 
-  title = cleanEventTitle(title);
+  title = cleanEventTitle(title, trimmed);
   if (title.length > 60) {
     title = title.substring(0, 60).trim() + '...';
   }
@@ -894,6 +993,9 @@ Rules:
    - 对于“X带队到Y做一线调研/座谈/走访”这类句式，标题应精炼规范提取为“X来调研”或“X调研/座谈”（如“图书馆馆长来调研”），绝不要保留“带队到Y做一线”等冗余叙述。
    - 彻底剔除主观意图动词与句末疑问（如“我有...”、“我们计划...”、“打算...”、“你有时间吧？”、“方便吗？”、“收到请回复”、“谢谢[握手]”等）。若包含参与人数量，合入名词短语（如“我有两个博士计划预答辩” -> “两个博士预答辩”）。
    - 彻底剔除改期原因与连词（如“由于有老师...有课”、“因此时间改为”），标题仅保留核心事件名词。
+   - 彻底剔除自我介绍与发信人身份声明（如“我是本次答辩的秘书XXX”、“我是项目负责人XXX”、“这里是行政部XXX”等），严禁将此类自我介绍句误作为标题！
+   - 标题严禁以“我是”、“本人是”开头，严禁以悬空的结构助词“的”或“时间”、“地点”结尾！
+   - 当通知文本中出现粘连格式【事项名】时间：...（例如“博士开题及中期时间：10月28日...”）时，前置的【事项名】是真正的核心事件名称，需提取为“博士开题及中期”或结合上下文事件词提取为“博士开题及中期答辩”，绝不能把前文的自我介绍或无事件意义的前缀当作标题。
    - 标题中不得包含日期、时间、地点、议程细节（如“交流核心包括...”）或表情符号。
 
 2. Date Parsing & Cross-Verification Rules (日期解析与双重核对规则):
@@ -936,6 +1038,9 @@ Rules:
    - Input: "各位老师下午好，赵帅奇博士预答辩安排如下：\n时间：9月24日（下周四）下午2:30\n地点：管理楼A515会议室\n请各位老师预留时间参加，谢谢[握手]"
      -> "title": "赵帅奇博士预答辩", "startTime": "${yyyy}-09-24T14:30:00", "endTime": "${yyyy}-09-24T15:30:00", "location": "管理楼A515会议室", "url": "", "allDay": false
      (解析要点：标题严格在12字以内且无标点；剔除“各位老师下午好”；双重核对9月24日与下周四，准确解析为09-24而非10-01)
+   - Input: "各位老师下午好，我是本次答辩的秘书安帅斌，博士开题及中期时间：10月28日（后天）下午1：30，地点：管理楼A507，共9名同学参加，顺序见截图，请各位老师预留时间，辛苦[咖啡]"
+     -> "title": "博士开题及中期答辩", "startTime": "${yyyy}-10-28T13:30:00", "endTime": "${yyyy}-10-28T14:30:00", "location": "管理楼A507", "url": "", "allDay": false
+     (解析要点：彻底忽略问候语“各位老师下午好”与自我介绍“我是本次答辩的秘书安帅斌”；从“博士开题及中期时间：”中提取核心事项“博士开题及中期”，并与“答辩”组合为“博士开题及中期答辩”；严禁输出残缺的“我是本次答辩的”；括号中的（后天）为辅助说明，严格以具体日期10月28日与下午1:30为基准；地点准确提取为“管理楼A507”)
    - Input: "我有两个博士计划下周二上午八点半预答辩，你有时间吧？"
      -> "title": "两个博士预答辩", "location": ""
    - Input: "我有两个博士计划下周二上午八点半在科技楼302预答辩，你有时间吧？"
@@ -1041,10 +1146,23 @@ export function buildEventFromAiData(d, text, referenceDate = new Date()) {
   // Deterministic hybrid reconciliation using local parser
   let finalLocation = d.location || '';
   let finalUrl = d.url || '';
+  let finalTitle = d.title || '';
 
   if (text && typeof text === 'string') {
     const localParsed = parseScheduleText(text, referenceDate);
     if (localParsed) {
+      // 0. Reconcile title if AI returned invalid, broken, or self-intro title
+      // e.g. starts with "我是", ends with "的", or empty/generic, while local parser found a specific title
+      const isBadAiTitle = !finalTitle ||
+        finalTitle === '日程安排' ||
+        /^(?:我是|本人是|这里是|俺是)/.test(finalTitle.trim()) ||
+        /(?:的|时间|地点)$/.test(finalTitle.trim()) ||
+        finalTitle.length <= 2;
+
+      if (isBadAiTitle && localParsed.title && localParsed.title !== '日程安排') {
+        finalTitle = localParsed.title;
+      }
+
       // 1. Supplement location if AI returned empty or whitespace but local parser identified location
       if ((!finalLocation || !finalLocation.trim()) && localParsed.location) {
         finalLocation = localParsed.location;
@@ -1072,7 +1190,7 @@ export function buildEventFromAiData(d, text, referenceDate = new Date()) {
 
   return {
     id: `event-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`,
-    title: cleanEventTitle(d.title || '日程安排'),
+    title: cleanEventTitle(finalTitle || '日程安排', text),
     startTime: startDate.toISOString(),
     endTime: endDate.toISOString(),
     allDay: !!d.allDay,

@@ -701,6 +701,11 @@ function updatePreview() {
     }).then((aiEvent) => {
       // Check if current text hasn't changed
       if (scheduleInput.value.trim() === text) {
+        if (aiEvent && localParsed && localParsed.title && localParsed.title !== '日程安排') {
+          if (/^(?:我是|本人是|这里是|俺是)/.test(aiEvent.title) || /(?:的|时间|地点)$/.test(aiEvent.title)) {
+            aiEvent.title = localParsed.title;
+          }
+        }
         latestParsedText = text;
         latestAiEvent = aiEvent;
         displayInPreview(aiEvent, true, false);
@@ -833,6 +838,15 @@ async function processAndGenerate(text, triggerDownload = true, force = false) {
       }
     } else {
       event = parseScheduleText(targetText);
+    }
+
+    if (event && event.title) {
+      if (/^(?:我是|本人是|这里是|俺是)/.test(event.title) || /(?:的|时间|地点)$/.test(event.title)) {
+        const local = parseScheduleText(targetText);
+        if (local && local.title && local.title !== '日程安排') {
+          event.title = local.title;
+        }
+      }
     }
   } catch (err) {
     console.error('Parsing failed or paused:', err);

@@ -188,5 +188,68 @@ const durationHours = (recEnd.getTime() - recStart.getTime()) / (1000 * 60 * 60)
 assert.strictEqual(durationHours, 1.5, 'Duration should be corrected from 1.0h to 1.5h using local parser range');
 console.log('✔ Test 7 passed: Hybrid reconciliation successfully corrected AI location and duration!\n');
 
+// 8. Test Academic Group Notice: Greeting + Self-Intro + Glued Title + Fullwidth Colon Time
+console.log('--- Test 8: Academic Group Notice Parsing ---');
+const academicCase = {
+  name: '高校群通知：问候语+自我介绍+无标点粘连事项名+全角冒号时间',
+  input: '各位老师下午好，我是本次答辩的秘书安帅斌，博士开题及中期时间：10月28日（后天）下午1：30，地点：管理楼A507，共9名同学参加，顺序见截图，请各位老师预留时间，辛苦[咖啡]',
+  expected: {
+    titleMatch: /^博士开题及中期(答辩)?$/,
+    month: 10,
+    day: 28,
+    startHour: 13,
+    startMinute: 30,
+    location: '管理楼A507'
+  }
+};
+
+const academicRefDate = new Date('2026-10-26T10:00:00+08:00');
+const academicResult = parseScheduleText(academicCase.input, academicRefDate);
+
+console.log('Parsed title:', academicResult.title);
+console.log('Parsed location:', academicResult.location);
+console.log('Parsed startTime:', academicResult.startTime);
+
+assert.ok(
+  academicCase.expected.titleMatch.test(academicResult.title),
+  `Title "${academicResult.title}" should match ${academicCase.expected.titleMatch}`
+);
+assert.strictEqual(academicResult.location, academicCase.expected.location);
+
+const academicStart = new Date(academicResult.startTime);
+assert.strictEqual(academicStart.getMonth() + 1, academicCase.expected.month, 'Month must be 10');
+assert.strictEqual(academicStart.getDate(), academicCase.expected.day, 'Day must be 28');
+assert.strictEqual(academicStart.getHours(), academicCase.expected.startHour, 'Hour must be 13 (下午 1:30)');
+assert.strictEqual(academicStart.getMinutes(), academicCase.expected.startMinute, 'Minute must be 30');
+console.log('✔ Test 8 passed: Academic group notice parsed accurately with correct title, date, time, and location!\n');
+
+// 9. Test Broken Title Recovery in cleanEventTitle and buildEventFromAiData
+console.log('--- Test 9: Broken AI Title Repair and FullText Salvage ---');
+const brokenAiTitle1 = '我是本次答辩的';
+const brokenAiTitle2 = '我是本次答辩的秘书安帅斌';
+
+const cleanedBroken1 = cleanEventTitle(brokenAiTitle1, academicCase.input);
+const cleanedBroken2 = cleanEventTitle(brokenAiTitle2, academicCase.input);
+
+console.log('Cleaned broken title 1 ("我是本次答辩的"):', cleanedBroken1);
+console.log('Cleaned broken title 2 ("我是本次答辩的秘书安帅斌"):', cleanedBroken2);
+
+assert.ok(academicCase.expected.titleMatch.test(cleanedBroken1), 'Should salvage broken title 1');
+assert.ok(academicCase.expected.titleMatch.test(cleanedBroken2), 'Should salvage broken title 2');
+
+// Safety net reconciliation when AI returns broken title "我是本次答辩的"
+const badAiOutput = {
+  title: '我是本次答辩的',
+  startTime: '2026-10-28T13:30:00',
+  endTime: '2026-10-28T14:30:00',
+  allDay: false,
+  location: '管理楼A507'
+};
+
+const reconciledBadAi = buildEventFromAiData(badAiOutput, academicCase.input, academicRefDate);
+console.log('Reconciled title from broken AI title:', reconciledBadAi.title);
+assert.ok(academicCase.expected.titleMatch.test(reconciledBadAi.title), 'AI output with "我是本次答辩的" must be repaired');
+console.log('✔ Test 9 passed: Broken AI title successfully repaired!\n');
+
 console.log('🎉 ALL TITLE & DATE PRECISION TESTS PASSED SUCCESSFULLY! 🎉');
 
