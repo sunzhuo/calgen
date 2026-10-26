@@ -3,4 +3,5 @@ android-project/
 *.keystore
 .wrangler/
 dist/
-
+.gemini/
+.bin/
