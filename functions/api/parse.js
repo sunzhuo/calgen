@@ -1,10 +1,23 @@
 /**
  * Cloudflare Pages Function: /api/parse
  * Uses Cloudflare Workers AI model: @cf/google/gemma-4-26b-a4b-it
- * Parses natural language schedule text into structured event data
+ * Parses natural language schedule text (including forwarded messages & chat records)
+ * into structured event data with shared subject-resolution logic from parser.js.
  */
 
+import {
+  cleanEventTitle,
+  preprocessForwardedText,
+  getCalendarAISystemPrompt,
+  extractJsonFromAiResponse,
+  extractExplicitScheduleDate,
+  parseScheduleText,
+  reconcileEventTitle
+} from '../../parser.js';
+
 const MODEL_ID = '@cf/google/gemma-4-26b-a4b-it';
+
+export const sanitizeTitle = cleanEventTitle;
 
 export async function onRequestOptions() {
   return new Response(null, {
@@ -17,129 +30,6 @@ export async function onRequestOptions() {
   });
 }
 
-/**
- * Sanitize and clean event title to keep it concise, clear, and focused on the core subject.
- * Strips salutations, polite greetings, boilerplate announcement prefixes/suffixes, emojis,
- * self-introduction phrases, and dangling particles.
- * @param {string} rawTitle
- * @param {string} [fullText]
- * @returns {string}
- */
-export function sanitizeTitle(rawTitle, fullText = '') {
-  if (!rawTitle || typeof rawTitle !== 'string') return '日程安排';
-  let t = rawTitle.trim();
-
-  // 1. Strip bracket emojis (e.g. [握手], [OK], [强], [玫瑰], [咖啡], [微笑])
-  t = t.replace(/\[[\u4e00-\u9fa5a-zA-Z0-9_\-]+\]/g, '').trim();
-
-  // 1.5 Strip meeting agenda/content details from the tail
-  t = t.replace(/(?:交流核心|主要内容|会议内容|研讨内容|会议议程|主要议程|议程包括|交流要点)[：:\s\S]*$/i, '');
-
-  // 2. Self-introduction extraction:
-  // e.g. "我是本次答辩的秘书安帅斌" -> "答辩"
-  const selfIntroMatch = t.match(
-    /^(?:我是|本人是|这里是|俺是)(?:本次|这次|本场)?(.+?)(?:的)?(?:秘书|负责人|联系人|主持人|组织者|助教|老师|同学|工作人员)(?:[\u4e00-\u9fa5]{0,6})?$/
-  );
-  if (selfIntroMatch && selfIntroMatch[1] && selfIntroMatch[1].trim()) {
-    t = selfIntroMatch[1].trim();
-  }
-
-  // 2.1 Strip standalone vocatives at the start (such as "各位负责人，", "各位老师：", "@所有人 ")
-  t = t.replace(
-    /^(?:各位(?:负责人|老师|领导|同事|同学|朋友|专家|会员|同仁|代表|家长|评审|评委|学长|学姐|新生|教授|大家)|老师们|领导们|同事们|同学们|大家|所有人|@所有人)\s*[，,：:\s]\s*/i,
-    ''
-  );
-
-  // 2.5 Strip salutations and greetings from the start
-  t = t.replace(/^(?:(?:各位(?:老师|领导|同事|同学|朋友|专家|会员|同仁|代表|家长|评审|评委|学长|学姐|新生|教授|负责人)?|大家|老师们|领导们|同事们|同学们)?(?:下午好|上午好|早上好|中午好|晚上好|好|您好|你好)|亲爱的.+?[好！!，,\s]|(?:Good\s+(?:morning|afternoon|evening)|Hi|Hello|Dear)\s+[^,，!！]+[,，!！]?)+[\s,，:：\-]*/i, '');
-
-  // 3. Strip recipient vocatives at the beginning
-  t = t.replace(/^(?:[A-Za-z\u4e00-\u9fa5]{2,5}|@\S+)[，,：:\s]+(?=(?:我|咱|请|有|下周|明天|后天|今天|关于|原定|现|麻烦|想|由于|因|各位))/i, '');
-
-  // 3.5 Semantic pattern normalization:
-  // e.g. "图书馆馆长带队到交通学院做一线调研" -> "图书馆馆长来调研"
-  const surveyMatch = t.match(
-    /(?:^|[，,。；;\s])([\u4e00-\u9fa5A-Za-z0-9]{2,10}?)(?:带队)?(?:到|来|赴|深入)[^，,。；;\n]{0,15}?(?:做|开展|进行|组织)?(?:一线|专题|专项|深入)?[^，,。；;\n]{0,6}(调研|走访|考察|交流|座谈|研讨|巡查|指导|督导|检查)/
-  );
-  if (surveyMatch) {
-    const subject = surveyMatch[1];
-    const action = surveyMatch[2];
-    t = (action === '调研' || action === '走访' || action === '考察' || action === '指导')
-      ? `${subject}来${action}`
-      : `${subject}${action}`;
-  }
-
-  // 4. Strip notification / announcement prefixes in a loop
-  const prefixPattern = /^(?:各位[^\s，,：:]{0,6}(?:上午好|下午好|晚上好|大家好|好)|(?:上午|下午|晚上)?好|我是|本人是|这里是|俺是|关于(?:举办|召开|组织|开展)?|通知|紧急通知|会议通知|日程安排|日程|安排|提醒|温馨提示|转发|本次|这次|本场)[\s，,：:]*|^(?:时间|地点|主题|事项|会议内容)\s*[:：]\s*/i;
-  let prev;
-  do {
-    prev = t;
-    t = t.replace(prefixPattern, '').trim();
-  } while (t !== prev);
-
-  // 5. Strip first-person and conversational intent prefixes
-  t = t.replace(/^(?:我(?:们)?|咱(?:们)?)(?:[这里边儿]+)?(?:[有想打算计划准备要需]|希望|拟|预备|准备)+[\s,，]*/i, '');
-  t = t.replace(/^(?:请问|麻烦问下|想问下|想请问|不知道你?|请问下)[\s,，]*/i, '');
-
-  // 6. Strip intermediate intent verbs before core schedule verbs/nouns
-  t = t.replace(/(?:\s*(?:计划|准备|打算|拟|预备)\s*)(?=(?:预答辩|答辩|开会|讨论|评审|评审会|研讨|汇报|开题|开题报告|结题|复试|面试|聚餐|碰头|交流|上线|发布))/i, '');
-
-  // 6.5 Strip leading date/time words from title
-  t = t.replace(/^(?:大后天|后天|明天|明日|今天|今日|昨天|昨日|下下周[一二三四五六日天]?|下周[一二三四五六日天]?|本周[一二三四五六日天]?|这周[一二三四五六日天]?|周[一二三四五六日天]|星期[一二三四五六日天])[\s,，]*/i, '');
-  t = t.replace(/^(?:早上|清晨|早晨|上午|中午|下午|傍晚|晚上|夜里|半夜|凌晨)[\s,，]*/i, '');
-
-  // 7. Strip leading action verbs like "开", "参加", "举行", "举办" if followed by event noun
-  t = t.replace(/^(?:开|举行|举办|参加|召开)\s*(?=[A-Za-z0-9\u4e00-\u9fa5]{2,}(?:周会|例会|会议|答辩|预答辩|评审|研讨|讨论|汇报|宣讲|典礼|仪式|发布会))/i, '');
-
-  // 8. Strip announcement boilerplate suffixes: ...安排如下, ...日程如下, ...通知如下, 如下, 的通知, 的安排
-  t = t.replace(/(?:的?(?:工作|日程|会议)?安排如下[：:]*|安排如下[：:]*|日程如下[：:]*|通知如下[：:]*|如下[：:]*|的通知|的安排)$/g, '');
-
-  // 9. Strip polite calls to action and closing conversational question tags
-  t = t.replace(/请(?:各位|大家)?.+?(?:参加|出席|预留时间).*$/g, '');
-  t = t.replace(/(?:谢谢|致谢|收到请回复).*$/g, '');
-  t = t.replace(/(?:[，,、\s]*(?:你?有(?:时间|空)(?:吗|吧|不|呀|呢)?|方便(?:吗|吧|不|呀|呢)?|你方便(?:吗|吧|不|呀|呢)?|你?能(?:来|参加)(?:吗|吧|不)?|能来(?:吗|吧|不)?|能参加(?:吗|吧|不)?|可以吗|可以吧|行不行|好不好|好吗|成吗|吗|吧|么)[\?？!！]*)+$/i, '');
-
-  // 9.5 Strip trailing person titles/roles, dangling particles, or time/location remnants in a loop
-  const suffixPattern = /(?:的(?:秘书|负责人|联系人|主持人|老师|同学|工作人员)?[\u4e00-\u9fa5]{0,4}|(?:具体|开始|会议|活动)?(?:时间|地点)|[的了呢吧啊呀及和与在：:，,。；;])+$/i;
-  do {
-    prev = t;
-    t = t.replace(suffixPattern, '').trim();
-  } while (t !== prev);
-
-  // 10. Strip residual location remnants: e.g. "，地点，", "地点："
-  t = t.replace(/^[，,、\s]*地点[：:\s,，]*/i, '');
-  t = t.replace(/[，,、\s]*地点[：:\s,，]*$/i, '');
-
-  // 11. Clean ALL punctuation marks from title (pure noun phrase, no punctuation)
-  t = t.replace(/[，,。;；:：!！?？"“”'‘’、~～\-—·\(\)（）\[\]【】]/g, '').trim();
-
-  // 11.5 Fallback check: if cleaned title is too short (<= 2 chars) or empty, attempt salvage from fullText
-  if (t.length <= 2 && fullText && typeof fullText === 'string') {
-    const gluedMatch = fullText.match(
-      /(?:^|[，。；！？、\s\n\r])([^\s，。；！？、：:\n\r]{2,18}?)(?:时间|地点)\s*[:：]/
-    );
-    if (gluedMatch) {
-      const candidate = gluedMatch[1]
-        .replace(/^(?:会议|活动|开始|结束|具体|通知|集合|开会|培训|日程|安排)$/, '')
-        .trim();
-      if (candidate) {
-        if (t && !candidate.endsWith(t) && (candidate + t).length <= 12) {
-          t = `${candidate}${t}`;
-        } else {
-          t = candidate;
-        }
-      }
-    }
-  }
-
-  // 12. Strictly limit title length to 12 characters
-  if (t.length > 12) {
-    t = t.substring(0, 12).trim();
-  }
-
-  return t || '日程安排';
-}
-
 export async function onRequestPost(context) {
   const { request, env } = context;
 
@@ -150,124 +40,27 @@ export async function onRequestPost(context) {
 
   try {
     const body = await request.json().catch(() => ({}));
-    let text = (body.text || '').trim();
-    if (!text) {
+    const rawText = (body.text || '').trim();
+    if (!rawText) {
       return new Response(
         JSON.stringify({ error: 'Missing schedule text' }),
         { status: 400, headers: corsHeaders }
       );
     }
-    text = text.replace(/(\d{1,2})\s*[:：]\s*(\d{2})/g, '$1:$2');
 
     const clientTime = body.clientTime || new Date().toISOString();
     const timezone = body.timezone || 'Asia/Shanghai';
     const now = new Date(clientTime);
-
-    // Format current reference time for the model
     const pad = (n) => String(n).padStart(2, '0');
-    const yyyy = now.getFullYear();
-    const mm = pad(now.getMonth() + 1);
-    const dd = pad(now.getDate());
-    const hh = pad(now.getHours());
-    const min = pad(now.getMinutes());
-    const weekdays = ['周日(Sunday)', '周一(Monday)', '周二(Tuesday)', '周三(Wednesday)', '周四(Thursday)', '周五(Friday)', '周六(Saturday)'];
-    const currentWeekday = weekdays[now.getDay()];
 
-    const systemPrompt = `You are an expert calendar assistant specialized in parsing schedule text into structured JSON.
-Current Reference Time: ${yyyy}-${mm}-${dd} ${hh}:${min} (${currentWeekday}), Timezone: ${timezone}.
-
-Extract the schedule event from the user's text and respond ONLY with a valid JSON object matching this schema:
-{
-  "title": "string (strictly concise core event noun phrase, <= 12 characters, no punctuation, e.g. 赵帅奇博士预答辩, 两个博士预答辩, 项目周会, 财务审计沟通会)",
-  "startTime": "string (ISO 8601 local date-time format YYYY-MM-DDTHH:mm:ss for the updated/new schedule)",
-  "endTime": "string (ISO 8601 local date-time format YYYY-MM-DDTHH:mm:ss for the updated/new schedule)",
-  "allDay": boolean,
-  "location": "string (physical location/room, or online meeting info like 腾讯会议 123-456-789, or empty string)",
-  "description": "string (original raw notes or details)",
-  "url": "string (meeting link or URL if mentioned, e.g. Tencent Meeting link https://meeting.tencent.com/dm/xxx, Zoom link, or empty string)",
-  "isModification": boolean,
-  "keepExistingLocation": boolean,
-  "targetCriteria": {
-    "titleKeywords": ["string"],
-    "originalDate": "string (YYYY-MM-DD if identifiable, or empty string)",
-    "originalTimeOfDay": "string (morning | afternoon | evening | empty string)"
-  }
-}
-
-Rules:
-1. Title Rules (标题规则):
-   - 长度严格限制在 12 个字以内（<= 12 characters）。
-   - 尽量使用名词或名词短语（如 "赵帅奇博士预答辩", "两个博士预答辩", "项目周会", "团队周会", "财务审计沟通会", "图书馆馆长来调研"）。
-   - 绝对不带任何标点符号（禁止包含逗号、句号、冒号、感叹号、顿号、问号、引号、括号等任何标点）。
-   - 彻底剔除开头的打招呼与问候语及通知对象称呼（如“各位负责人，”、“各位老师下午好，”、“大家下午好，”、“各位领导好，”、“老师们好，”、“下午好，”、“@所有人”等，绝不能作为标题的一部分！）。
-   - 彻底剔除事务性与通知套话（如“...安排如下”、“...日程如下”、“...通知如下”、“...的通知”、“关于召开...”等）。例如输入“各位老师下午好，赵帅奇博士预答辩安排如下：”，标题必须提取为“赵帅奇博士预答辩”，绝对不要输出“各位老师下午好，赵帅奇博士预答辩”。
-   - 对于“X带队到Y做一线调研/座谈/走访”这类句式，标题应精炼规范提取为“X来调研”或“X调研/座谈”（如“图书馆馆长来调研”），绝不要保留“带队到Y做一线”等冗余叙述。
-   - 彻底剔除主观意图动词与句末疑问（如“我有...”、“我们计划...”、“打算...”、“你有时间吧？”、“方便吗？”、“收到请回复”、“谢谢[握手]”等）。若包含参与人数量，合入名词短语（如“我有两个博士计划预答辩” -> “两个博士预答辩”）。
-   - 彻底剔除改期原因与连词（如“由于有老师...有课”、“因此时间改为”），标题仅保留核心事件名词。
-   - 彻底剔除自我介绍与发信人身份声明（如“我是本次答辩的秘书XXX”、“我是项目负责人XXX”、“这里是行政部XXX”等），严禁将此类自我介绍句误作为标题！
-   - 标题严禁以“我是”、“本人是”开头，严禁以悬空的结构助词“的”或“时间”、“地点”结尾！
-   - 当通知文本中出现粘连格式【事项名】时间：...（例如“博士开题及中期时间：10月28日...”）时，前置的【事项名】是真正的核心事件名称，需提取为“博士开题及中期”或结合上下文事件词提取为“博士开题及中期答辩”，绝不能把前文的自我介绍或无事件意义的前缀当作标题。
-   - 标题中不得包含日期、时间、地点、议程细节（如“交流核心包括...”）或表情符号。
-
-2. Date Parsing & Cross-Verification Rules (日期解析与双重核对规则):
-   - 具体日期优先（Explicit Date Priority）：文本中如果出现具体明确的月日（如“9月24日”、“2026-09-24”、“9/24”、“10月5号”等），必须以该明确日期为绝对基准！年份根据 Current Reference Time (${yyyy}) 推算。
-   - 双重核对（Cross-Verification）：当文本中同时出现具体日期与星期/相对周表达时（例如“9月24日（下周四）”、“9月24日 周四”、“10月15日(本周四)”）：
-     * 必须双重核对具体日期与星期！
-     * 具体日期“9月24日”是明确且决定性的事件日期，“下周四”仅为自然语言中的星期补充标注，绝非再加 7 天！
-     * 绝不能只解析“下周四”而错误推算出“10月1日”！该日程日期必须严格解析为 9月24日（${yyyy}-09-24）。
-   - 仅相对日期时的计算：仅当文本中完全没有具体月日（仅有“下周四”、“明天下午”、“后天”等）时，才严格基于 Current Reference Time 进行相对计算（中文周一为一周起始，下周四指下个周一至周日周期内的周四）。
-
-3. Location Rules:
-   - 提取具体物理地点或会议室（如“管理楼A515”、“管理楼A515会议室”、“科技楼302”、“315会议室”）。
-   - “地点管理楼A515”与“地点：管理楼A515”含义完全相同，即使没有冒号或空格也必须准确提取地点为“管理楼A515”。
-   - 地点中严禁包含动词或事件名称（如“在管理楼A515预答辩” -> location 应为“管理楼A515”，不能包含“预答辩”）。
-   - 若为线上会议（腾讯会议/Zoom）且无实体地点，填写“腾讯会议 123-456-789”或“Zoom 123-456-789”。
-
-4. Modification / Reschedule Rules:
-   - 若文本表达对已有日程的修改、改期、推迟、提前（如“改为”、“改到”、“调整为”、“推迟”、“原定...改...”）：
-     * "isModification": true.
-     * "targetCriteria":
-       - "titleKeywords": [被修改的核心事件名，如 "赵帅奇博士预答辩", "预答辩"]
-       - "originalDate": 修改前的原日期（YYYY-MM-DD）
-       - "originalTimeOfDay": "afternoon" / "morning" / "evening"
-     * 若提示地点不变（如“地点不变”、“原地点”），"keepExistingLocation": true.
-     * "startTime" 与 "endTime" 严格计算为修改后的新时间。
-   - 若为常规新日程，"isModification": false, "keepExistingLocation": false, "targetCriteria": null.
-
-5. Time & Duration Rules:
-   - 格式为 ISO 8601 本地时间 YYYY-MM-DDTHH:mm:ss。
-   - “8:30分-10:00”中的“分”属于分钟单位，准确解析为开始时间 08:30:00，结束时间 10:00:00，严禁退化为默认 1 小时。
-   - 未指定结束时间时：若提到时长（如预计1.5小时），则加上时长；若未提时长且非全天，默认结束时间为开始时间后1小时；全天日程开始与结束日期相同且时间为 00:00:00。
-
-6. Meeting URL:
-   - 腾讯会议号（如 123-456-789）自动转换为 https://meeting.tencent.com/dm/123456789 填入 url 字段。
-
-7. Few-Shot Examples (少样本示例):
-   - Input: "各位负责人，图书馆馆长带队到交通学院做一线调研，时间定在9月21日上午8:30分-10:00；地点管理楼A515。交流核心包括：一、图书馆老师简单介绍现有资源和服务。"
-     -> "title": "图书馆馆长来调研", "startTime": "${yyyy}-09-21T08:30:00", "endTime": "${yyyy}-09-21T10:00:00", "location": "管理楼A515", "url": "", "allDay": false
-     (解析要点：剔除“各位负责人”称呼；提取规范事件标题“图书馆馆长来调研”；准确提取无冒号地点“管理楼A515”；“8:30分-10:00”准确解析为08:30至10:00而非默认1小时)
-   - Input: "各位老师下午好，赵帅奇博士预答辩安排如下：\n时间：9月24日（下周四）下午2:30\n地点：管理楼A515会议室\n请各位老师预留时间参加，谢谢[握手]"
-     -> "title": "赵帅奇博士预答辩", "startTime": "${yyyy}-09-24T14:30:00", "endTime": "${yyyy}-09-24T15:30:00", "location": "管理楼A515会议室", "url": "", "allDay": false
-     (解析要点：标题严格在12字以内且无标点；剔除“各位老师下午好”；双重核对9月24日与下周四，准确解析为09-24而非10-01)
-   - Input: "各位老师下午好，我是本次答辩的秘书安帅斌，博士开题及中期时间：10月28日（后天）下午1：30，地点：管理楼A507，共9名同学参加，顺序见截图，请各位老师预留时间，辛苦[咖啡]"
-     -> "title": "博士开题及中期答辩", "startTime": "${yyyy}-10-28T13:30:00", "endTime": "${yyyy}-10-28T14:30:00", "location": "管理楼A507", "url": "", "allDay": false
-     (解析要点：彻底忽略问候语“各位老师下午好”与自我介绍“我是本次答辩的秘书安帅斌”；从“博士开题及中期时间：”中提取核心事项“博士开题及中期”，并与“答辩”组合为“博士开题及中期答辩”；严禁输出残缺的“我是本次答辩的”；括号中的（后天）为辅助说明，严格以具体日期10月28日与下午1:30为基准；地点准确提取为“管理楼A507”)
-   - Input: "我有两个博士计划下周二上午八点半预答辩，你有时间吧？"
-     -> "title": "两个博士预答辩", "location": ""
-   - Input: "我有两个博士计划下周二上午八点半在科技楼302预答辩，你有时间吧？"
-     -> "title": "两个博士预答辩", "location": "科技楼302"
-   - Input: "张老师，我们打算明天下午3点在315会议室开项目周会，方便吗？"
-     -> "title": "项目周会", "location": "315会议室"
-   - Input: "下周三上午10点腾讯会议：123-456-789 开团队周会 预计1.5小时"
-     -> "title": "团队周会", "location": "腾讯会议 123-456-789", "url": "https://meeting.tencent.com/dm/123456789"
-   - Input: "各位老师好，由于有老师下周四下午有课，因此预答辩时间改为上午9：30，地点不变，辛苦各位老师"
-     -> "title": "预答辩", "isModification": true, "keepExistingLocation": true, "targetCriteria": { "titleKeywords": ["预答辩"], "originalTimeOfDay": "afternoon" }
-
-8. Output MUST be strictly valid JSON without any markdown code fence blocks or extra explanation.`;
+    // Structural pre-processing of forwarded headers, chat timestamps, speakers, and org entities
+    const prep = preprocessForwardedText(rawText);
+    const aiUserContent = (prep.aiInputText || rawText).replace(/(\d{1,2})\s*[:：]\s*(\d{2})/g, '$1:$2');
+    const systemPrompt = getCalendarAISystemPrompt(now, timezone);
 
     const messages = [
       { role: 'system', content: systemPrompt },
-      { role: 'user', content: text }
+      { role: 'user', content: aiUserContent }
     ];
 
     let aiResultText = '';
@@ -377,21 +170,9 @@ Rules:
       );
     }
 
-    // Parse the JSON output from Gemma
     let parsedJson = null;
     try {
-      // Strip markdown code fences ```json ... ``` if present
-      const cleaned = aiResultText
-        .replace(/```(?:json)?/gi, '')
-        .replace(/```/g, '')
-        .trim();
-
-      const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        parsedJson = JSON.parse(jsonMatch[0]);
-      } else {
-        parsedJson = JSON.parse(cleaned);
-      }
+      parsedJson = extractJsonFromAiResponse(aiResultText);
     } catch (parseErr) {
       console.error('Failed to parse Gemma output as JSON:', aiResultText, parseErr);
       return new Response(
@@ -405,39 +186,31 @@ Rules:
       );
     }
 
-    // Sanitize parsedJson to guarantee <= 12 chars title, no punctuation, greetings stripped, and date cross-checked
+    // Post-process & reconcile parsedJson with forwarded subject context and clean schedule date
     if (parsedJson && typeof parsedJson === 'object') {
-      if (parsedJson.title && typeof parsedJson.title === 'string') {
-        parsedJson.title = sanitizeTitle(parsedJson.title, text);
+      const localParsed = parseScheduleText(rawText, now);
+      const candidateTitle = typeof parsedJson.title === 'string' ? parsedJson.title : '';
+      parsedJson.title = reconcileEventTitle(candidateTitle, localParsed ? localParsed.title : '', rawText);
+
+      if ((!parsedJson.location || !String(parsedJson.location).trim() || parsedJson.location === '办公室' || parsedJson.location === '我办公室') &&
+          localParsed && localParsed.location) {
+        parsedJson.location = localParsed.location;
       }
 
-      // Cross-check date with explicit date in text if present (e.g. 9月24日 vs 下周四 -> 10月1日)
-      if (parsedJson.startTime && typeof parsedJson.startTime === 'string') {
-        let expYear = null, expMonth = null, expDay = null;
-        const m1 = text.match(/(?:(\d{4})[\.\/\-年])?(\d{1,2})月(\d{1,2})[日号]?/);
-        if (m1) {
-          expYear = m1[1] ? parseInt(m1[1], 10) : now.getFullYear();
-          expMonth = parseInt(m1[2], 10);
-          expDay = parseInt(m1[3], 10);
-        } else {
-          const m2 = text.match(/(?:^|[^\d])(\d{4})[\.\/\-](\d{1,2})[\.\/\-](\d{1,2})(?!\d)/);
-          if (m2) {
-            expYear = parseInt(m2[1], 10);
-            expMonth = parseInt(m2[2], 10);
-            expDay = parseInt(m2[3], 10);
-          } else {
-            const m3 = text.match(/(?:^|[^\d:])(0?[1-9]|1[0-2])[\/\-](0?[1-9]|[12]\d|3[01])(?!\d|:)/);
-            if (m3) {
-              expYear = now.getFullYear();
-              expMonth = parseInt(m3[1], 10);
-              expDay = parseInt(m3[2], 10);
-            }
-          }
-        }
+      if ((!parsedJson.url || !String(parsedJson.url).trim()) && localParsed && localParsed.url) {
+        parsedJson.url = localParsed.url;
+      }
 
-        if (expMonth !== null && expDay !== null && expMonth >= 1 && expMonth <= 12 && expDay >= 1 && expDay <= 31) {
-          const expDateStr = `${expYear}-${pad(expMonth)}-${pad(expDay)}`;
+      if (!parsedJson.description) {
+        parsedJson.description = rawText;
+      }
 
+      // Cross-check date against explicit date in CLEANED schedule body (ignoring chat header send timestamps!)
+      if (parsedJson.startTime && typeof parsedJson.startTime === 'string' && !parsedJson.isModification) {
+        const dateCheckSource = prep.latestScheduleTurnText || prep.cleanText || rawText;
+        const expDate = extractExplicitScheduleDate(dateCheckSource, now);
+        if (expDate) {
+          const expDateStr = `${expDate.year}-${pad(expDate.monthIndex + 1)}-${pad(expDate.day)}`;
           const currentStartMatch = parsedJson.startTime.match(/^(\d{4}-\d{2}-\d{2})(T\d{2}:\d{2}:\d{2})/);
           if (currentStartMatch && currentStartMatch[1] !== expDateStr) {
             parsedJson.startTime = `${expDateStr}${currentStartMatch[2]}`;

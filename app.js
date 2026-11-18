@@ -1,4 +1,4 @@
-import { parseScheduleText, parseScheduleTextAsync, parseScheduleWithAI, testAiConnection, isEventOutdated, findMatchingSchedule } from './parser.js';
+import { parseScheduleText, parseScheduleTextAsync, parseScheduleWithAI, testAiConnection, isEventOutdated, findMatchingSchedule, reconcileEventTitle } from './parser.js';
 import { buildICS, downloadICS, openCalendarEvent, isNativeApp, getSafeICSFilename, getNativeCalendarPlugin } from './ics.js';
 
 const STORAGE_KEY = 'calgen_schedules_v1';
@@ -702,9 +702,7 @@ function updatePreview() {
       // Check if current text hasn't changed
       if (scheduleInput.value.trim() === text) {
         if (aiEvent && localParsed && localParsed.title && localParsed.title !== '日程安排') {
-          if (/^(?:我是|本人是|这里是|俺是)/.test(aiEvent.title) || /(?:的|时间|地点)$/.test(aiEvent.title)) {
-            aiEvent.title = localParsed.title;
-          }
+          aiEvent.title = reconcileEventTitle(aiEvent.title, localParsed.title, text);
         }
         latestParsedText = text;
         latestAiEvent = aiEvent;
@@ -841,11 +839,9 @@ async function processAndGenerate(text, triggerDownload = true, force = false) {
     }
 
     if (event && event.title) {
-      if (/^(?:我是|本人是|这里是|俺是)/.test(event.title) || /(?:的|时间|地点)$/.test(event.title)) {
-        const local = parseScheduleText(targetText);
-        if (local && local.title && local.title !== '日程安排') {
-          event.title = local.title;
-        }
+      const local = parseScheduleText(targetText);
+      if (local && local.title && local.title !== '日程安排') {
+        event.title = reconcileEventTitle(event.title, local.title, targetText);
       }
     }
   } catch (err) {
@@ -1349,11 +1345,13 @@ function setupListeners() {
  */
 function handleIncomingShare() {
   const params = new URLSearchParams(window.location.search);
-  const sharedTitle = params.get('title') || '';
-  const sharedText = params.get('text') || '';
-  const sharedUrl = params.get('url') || '';
+  const rawSharedTitle = (params.get('title') || '').trim();
+  const sharedText = (params.get('text') || '').trim();
+  const sharedUrl = (params.get('url') || '').trim();
+  const isGenericShareTitle = /^(?:微信|WeChat|QQ|TIM|钉钉|DingTalk|飞书|Feishu|Lark|企业微信|聊天记录|合并转发|转发|分享|信息|短信|邮件|日程生成器|CalGen)$/i.test(rawSharedTitle);
+  const sharedTitle = (!isGenericShareTitle && rawSharedTitle && !sharedText.includes(rawSharedTitle)) ? rawSharedTitle : '';
 
-  const combined = [sharedTitle, sharedText, sharedUrl].filter(Boolean).join(' ').trim();
+  const combined = [sharedTitle, sharedText, sharedUrl].filter(Boolean).join('\n').trim();
   if (combined) {
     scheduleInput.value = combined;
     updatePreview();
